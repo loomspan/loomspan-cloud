@@ -6,7 +6,7 @@ This is a living record of the lifecycle discussion following the [namespace des
 
 The document distinguishes current product directions from tentative mechanisms and open questions. It is not a finalized specification or implementation plan. Later clarifications here supersede earlier suggestions where explicitly noted, particularly Share Nothing departure behavior and sandbox refresh.
 
-No framework or sidecar code has been inspected as part of this discussion. Existing isolation, identity propagation, execution-version handling, and timeout capabilities described by the project owner remain to be verified.
+The subsequent [identity and JWT inspection](007-identity-and-jwt-findings.md) established existing authenticated-caller propagation from source and test-code inspection. Publication drainage, timeout termination guarantees, and the remaining lifecycle integration have not been verified by that inspection.
 
 ## 1. Responsibility boundary
 
@@ -141,39 +141,99 @@ Multiple Cloud instances are explicitly outside V1. Publication admission and dr
 
 The project owner wants app interaction tied to an app registration on the user's profile, making departure an explicit event Cloud can track.
 
-The exact registration trigger is open. In particular, the assistant suggested distinguishing discovery from participation; that distinction has not been finalized. How registration relates to invitation acceptance, access checks, and the first authenticated operation still needs design.
+For invited participants, matching verified email plus explicit invitation acceptance creates app registration. Login or invitation discovery alone does not. See [Companion-First Invitations](009-companion-first-invitations.md) for the agreed invitation and rejoin rules. Registration details for app creation and the implementation of lifecycle events remain to be designed.
 
 App ownership and participation are related but distinct: a participant may use the app under its data strategy, while ownership controls changes to the shared app definition.
 
 ## 6. Leaving an app and data retention
 
-These behaviors belong to Cloud and depend on the selected data strategy.
+These agreed V1 behaviors belong to Cloud. Voluntary departure and owner removal both end membership, while data handling depends on the app's strategy.
 
-| Strategy | Current departure direction |
+### Owner removal of active members
+
+- Only the current app owner can remove another participant.
+- Removal ends membership and blocks new app operations and skill-pack retrieval. Previously downloaded instructions cannot be recalled, but do not authorize continued access.
+- Already accepted queued and running operations may finish under the access decision already made. Removal does not promise cancellation of all existing work. The execution integration still needs verification.
+- Removal does not transfer ownership of the participant's records or grant the app owner new rights to delete or claim them.
+- Rejoining requires a new invitation and explicit acceptance. An old accepted invitation cannot restore membership.
+
+Removing an active member is distinct from revoking a pending invitation.
+
+### Personal archives and active data
+
+| Strategy | Behavior on voluntary departure or removal |
 |---|---|
-| Share Nothing | Archive the departing user's data when they leave, since other users could not see it anyway. |
-| Owner Edit / Everyone Read | A departing user can choose whether their contributed data is removed or retained for others. |
-| Share Everything | Shared data remains when a participant leaves. |
+| Share Nothing | Archive the user's data for their download and remove it from active app use. The archive is private to the departing user, not accessible to the app owner or other participants. |
+| Owner Edit / Everyone Read | Archive a copy of the user's contributions for their download. Contributions retained in the app remain read-only to other participants; the departing user has a 30-day choice to remove their active contributions. |
+| Share Everything | Shared content remains available for remaining participants to manage under the existing strategy. The new personal-archive policy does not apply. |
 
-The Share Nothing rule is an explicit correction from the project owner. It replaces the earlier idea of asking whether that private data should remain for other participants.
+For Share Nothing and Owner Edit, the personal archive is available to the departing user for **30 days after departure or removal**, then is deleted. The deadline ends both download access and archive retention, not merely visibility in the dashboard.
 
-“Archive,” “remove,” and “clean up” are lifecycle intentions here, not defined storage operations or guarantees about recovery. Archive location, retention duration, access, eventual deletion, and behavior upon rejoining remain open.
+The archive is a copy for the user's retrieval, separate from any records retained in the app. Download and permitted cleanup are Cloud account-management capabilities that do not require active membership. Removing contributions from the app during the window does not delete the archive early.
 
-### When the app owner leaves
+The intended archive represents the user's data at departure. The assistant recommended securing that snapshot before active-data cleanup. Coordination with already accepted work, archive creation failures, and the exact snapshot cutoff remain implementation questions; no race-free mechanism has yet been designed.
 
-For Owner Edit / Everyone Read, the project owner clarified that the primary user/app owner can still have their own data cleaned up when leaving. Remaining participants can continue using the app as it stands, but no future changes to the shared app definition would be possible without an owner.
+### Owner Edit cleanup window
 
-This means continued use under the existing data strategy; it does not freeze all participant data or grant participants authority to redesign the app.
+Voluntary departures and removed participants receive the same 30-day cleanup window:
 
-The project owner proposed a **possible ownership-transfer option**: the departing owner could promote another remaining participant to become the app owner. This is a candidate feature, not yet a finalized requirement or transfer workflow. It would be an explicit evolution of the earlier creator-only editing rule.
+- A voluntarily departing user may choose to remove or retain their contributions when leaving. If retained, they may choose removal during the remainder of the window.
+- A removed participant's contributions initially remain read-only in the app. That participant can choose to remove them during the window.
+- After 30 days, the special post-departure removal right ends. Contributions left in the app remain read-only to remaining participants, and the personal archive is deleted.
+- The archive is provided in either case, whether active contributions are removed or retained.
 
-How owner departure behaves under other strategies, how retained records owned by a departed participant can be maintained, and what happens if no successor is selected remain to be worked through. The stated Owner Edit behavior should not silently be generalized to all cases.
+This is a narrow right over the departing user's own contributions, not permission to resume ordinary app operations or access other participants' data.
+
+### Rejoining
+
+Rejoin behavior follows document 009: Share Nothing users start without active personal data and do not automatically restore archives; Owner Edit users regain control of retained records associated with their internal account ID; Share Everything users regain access to current shared content. Removed records stay removed.
+
+The interaction between rejoining and a still-running archive/cleanup window needs implementation clarification. No automatic deadline extension or archive restoration is established here.
+
+### Ownership transfer
+
+Ownership transfer is now an agreed V1 capability, replacing its earlier tentative status. It is an explicit exception to the original creator-only administration model: the current owner controls the app and can transfer that role.
+
+1. The current owner selects an active participant as successor.
+2. Cloud offers the transfer to that participant.
+3. The recipient explicitly accepts.
+4. Cloud changes ownership in one operation.
+
+Until completion, the original owner remains responsible and can cancel the pending transfer. If either party leaves before completion, the pending transfer becomes invalid.
+
+On completion:
+
+- The new owner gains publication, invitation, member-management, and sandbox authority.
+- The former owner remains an ordinary participant unless they separately leave. Transfer alone is not a departure or personal-archive event.
+- The app identity, production data, memberships, and selected data strategy remain unchanged.
+- Ownership does not grant special access to records kept private by the data strategy, and does not change contribution ownership.
+
+Before the new owner receives sandbox access, clear sandbox application data while preserving the sandbox schema and app definitions. This prevents an owner-data refresh from exposing the former owner's private records to the successor. The new owner can subsequently refresh using their own permitted production data.
+
+Any pending publication must finish or be resolved before transfer completes. The exact coordination of acceptance, sandbox clearing, authority changes, and partial failures remains open.
+
+### When the owner leaves without a successor
+
+Remaining participants can continue using the app as it stands under its existing data strategy. Nobody can publish changes or issue new invitations without an owner. V1 does not automatically elect a replacement owner.
+
+The departing owner's personal data follows the strategy-specific departure rules above. App ownership itself does not exempt that person from the archive or retention policy.
 
 ### When no registered participants remain
 
 The project owner's direction is that all app data can be archived and removed once nobody remains registered to the app.
 
-What removal means operationally, when it occurs, and whether the app definition itself is retained have not been decided. Restoration or later reactivation has not been promised.
+Pending invitations are invalidated so they cannot silently reactivate the app. The timing and storage mechanics of whole-app archival/removal, retention of the app definition, and any later reactivation remain open. This does not erase the agreed 30-day personal-download window: eligible departed users must retain that access even without app membership. Whole-app archives, including Share Everything content, do not acquire a defined retention period merely from the personal-archive rule.
+
+### Remaining lifecycle implementation questions
+
+- Archive format, storage, authorization, deletion scheduling, and recovery from failed archival or cleanup jobs.
+- Snapshot consistency with accepted work and concurrent changes to shared data.
+- Selecting a user's contributions and handling dependent records when those contributions are removed.
+- Deadline representation and enforcement at the 30-day boundary.
+- Cleanup and archive behavior when a user rejoins before expiry.
+- Ownership-transfer offer lifetime, duplicate/concurrent acceptances, and failure recovery during sandbox clearing.
+- Billing and usage responsibility after ownership transfer; no billing reassignment policy has been selected.
+- Coordination with publication, owner departure, and last-member app retirement.
 
 ## 7. Usage, tiers, and dashboard
 
