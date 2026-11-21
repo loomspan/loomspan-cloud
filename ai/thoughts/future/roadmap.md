@@ -14,7 +14,7 @@ This structure supports our goal of building Loomspan Cloud as a modular system.
 
 Users create applications, submit work to them, and see how they are running. Loomspan Cloud manages where each application runs. Users and their AI companions can work entirely in terms of applications. It will use Loomspan Framework and Loomspan Extensions. We expect to organize the project into sub-projects, each responsible for one part of the cloud. The first three we envision are the execution engine, the administration UI, and the API.
 
-The [proposed architecture diagram](loomspan-cloud-architecture.png) shows how the cloud publishes applications, routes work, and returns diagnostics. The Supabase component shown as a candidate is selected for V1. Compute hosting and trace storage remain open.
+The [proposed architecture diagram](loomspan-cloud-architecture.png) shows how the cloud publishes applications, routes work, and returns diagnostics. Read its candidate labels against the V1 decisions below. We have selected K3s and hosted Supabase. The published configurations shown beside Postgres are tracked there by reference. The Go backend stores the ZIPs on a mounted filesystem, and engines write traces to a shared filesystem. The compute and filesystem providers remain open.
 
 ### Guiding principle: an AI-first cloud
 
@@ -46,7 +46,7 @@ V1 uses hosted Supabase Auth for sign-in and hosted Supabase Postgres as Loomspa
 
 If needed, we can revisit self-hosting and fork the components that require changes.
 
-One compute hosting option under consideration is to run the REST, MCP, and administration backend and the Java execution engines in a K3s cluster we operate on Oracle Cloud Always Free compute.
+Development, QA, and production will use K3s so the Go backend and Java engines use the same deployment model in every environment. Oracle Cloud Always Free compute remains a hosting option.
 
 ### Preferred languages and frameworks
 
@@ -89,15 +89,17 @@ The Go management backend and Java engine authenticate each other with mutual TL
 
 An execution engine is an internal Loomspan Cloud component that can run many tenants’ namespaces together. Each cloud application maps to a Framework namespace. We will build it in Java so it can use Loomspan Framework directly. We expect to embed the framework in an engine tailored to running inside Loomspan Cloud.
 
-The Java execution engine will be disposable. If we use Kubernetes, we prefer to start with K3s to keep the initial cluster simple to operate. The hosting choice and all integration points between Loomspan Cloud and Kubernetes remain open.
+The Java execution engine runs in a disposable K3s pod.
 
 ### Cloud-managed engine lifecycle
 
-When an owner publishes an update, the current version keeps serving until Cloud confirms the new version is ready. New invocations then use the new version. Invocations already running finish on the version they started with. If the update fails, the current version stays live and the owner can see that the publication failed.
+Framework handles cutover within a running engine. It prepares the replacement while the current generation serves. After a successful publish, new invocations use the new generation. Already admitted invocations finish with their captured generations, including for reachable child skills. If preparation or publication fails, the current version stays live and Cloud reports the failure to the owner.
 
-Loomspan Cloud holds each application's current published skills and runtime configuration independently of the engines and their cluster. The cloud owns the policy for how namespaces run, decides which engines should host each namespace, and tracks which namespaces are actually installed on each engine.
+The Go backend keeps the original uploaded ZIP on a durable mounted filesystem. Each publication refers to an immutable ZIP containing the skills and runtime configuration. Supabase Postgres holds the application's publication history, the filesystem reference and status for each publication, and the identity of the current publication. This keeps the pack available for download and engine recovery independently of the engine cluster. Storing the original ZIP preserves the exact download for promotion between applications and keeps pack size and history from driving Supabase database usage.
 
-The cloud requests engine capacity and watches for availability. A new engine starts ready to receive configuration. The cloud pushes the complete publication for each assigned namespace through the engine's internal API and confirms it is available there before directing work to it. If an engine or cluster is lost, the cloud can repeat that process on a replacement using the saved publications.
+The cloud owns the policy for how namespaces run, decides which engines should host each namespace, and tracks which namespaces are actually installed on each engine.
+
+The cloud requests engine capacity and watches for availability. A new engine starts ready to receive configuration. Go reads the ZIP from its publication mount and sends it through the engine's internal API. The Java wrapper adapts the pack to Framework's prepare and publish operations. The placement controller uses this same path to restore a saved publication after engine or cluster loss and confirms the installed version before routing work.
 
 Framework's `SkillReloader.prepare` accepts an optional, opaque `publicationVersion` for a complete namespace update. Cloud will assign one durable value to each complete publication of skills and runtime configuration and reuse it when installing that publication on another engine. After a successful publish, the engine's instance observation endpoint reports the host-supplied version alongside the active Framework `generationId`, which is local to the engine process.
 
@@ -107,9 +109,9 @@ For invocation, the Java wrapper can use `SkillTemplate` with a namespace-qualif
 
 Start with one execution engine and two responsibilities in the Go backend. A controller compares the cloud's intended namespace placements with the publications each engine instance has confirmed. It pushes missing publications and treats a replacement instance as empty, including when the Java process restarts within the same pod. A routing function sends an authorized invocation only to an available instance that has confirmed the requested application version.
 
-If we use K3s, one candidate is a Kubernetes Deployment to maintain the engine pool, with the controller watching pods for availability. K3s ingress could direct public requests to the Go backend through a Kubernetes Service. The backend would then select the specific engine for the application. The integration details remain open.
+One candidate is a Kubernetes Deployment to maintain the engine pool, with the controller watching pods for availability. K3s ingress could direct public requests to the Go backend through a Kubernetes Service. The backend would then select the specific engine for the application. The integration details remain open.
 
-If we use K3s, an ingress NetworkPolicy on the engine pods will restrict pod-to-pod access to the engine API port to Go management backend pods in the management namespace.
+An ingress NetworkPolicy on the engine pods will restrict pod-to-pod access to the engine API port to Go management backend pods in the management namespace.
 
 On K3s, cert-manager will provision and rotate the mTLS certificates for communication between the Go management backend and the Java engines. The Go backend will use one client credential. All Java engine pods, including new and replacement pods, will use one shared server credential.
 
@@ -124,11 +126,13 @@ On K3s, cert-manager will provision and rotate the mTLS certificates for communi
 
 When tracing is enabled, Cloud retains execution traces on a durable volume. Users and their companions can inspect traces for their authorized applications until the traces expire, even if the engine is lost or the cluster is replaced. The retention period is still to be determined.
 
-A shared filesystem is one candidate for the volume. The storage backend, how multiple engines write to it concurrently, and how a replacement cluster regains access remain open.
+Each engine pod mounts a shared persistent filesystem and writes traces there. A completed durable write must survive loss of the writing pod. Storage selection must also support access from a replacement cluster. The provider, concurrent write layout, and retention period are component design decisions. Whether publications and traces use the same storage service remains open.
+
+V1 Cloud run history covers invocations with a retained trace. Users and their companions can look up those runs and inspect their traces through Console or MCP with the user's application permissions. One proposed read path gives Go diagnostics read-only access to the trace filesystem.
 
 ### Tenant isolation and shared capacity
 
-Application owners can publish skills and runtime configuration. Loomspan Cloud controls which executable extensions are installed in the shared engine.
+Application owners can publish skills and runtime configuration. Cloud enables only Loomspan extensions it has vetted and configured for the shared engine. Vetting an extension includes verifying that it keeps each tenant's supplied configuration, credentials, and data isolated when multiple applications use it in the same JVM.
 
 An application’s complete skill pack and runtime configuration travel together and are published as one version. References within the pack to the application itself are relative to the destination application, including in its configuration. Explicit references to shared executors and other external dependencies keep their targets.
 
@@ -198,7 +202,9 @@ The API will let users submit work and will likely also provide status and metri
 
 ### Synchronous invocation
 
-In the first release, clients will invoke an application synchronously and receive its result or reported error on the same request. If the API cannot return an execution result, it will distinguish two outcomes.
+In the first release, clients invoke an application synchronously. The API includes invocation metadata with every skill result and every reported skill error, even when tracing is disabled.
+
+If the API cannot return an execution result, it will distinguish two outcomes.
 
 - **Rejected before execution** means the cloud can confirm that the skill never started. If no engine is ready to serve the application's requested version, Cloud promptly reports that the application is temporarily unavailable. The caller can safely retry that invocation.
 - **Outcome unknown** means the cloud dispatched the invocation and lost contact with the engine before it could confirm the result. The skill may have completed or produced side effects. Retrying could repeat them.

@@ -26,11 +26,11 @@ The companion should have access to Framework's skill definitions and authoring 
 
 ## Try a published skill
 
-The user can select a published skill in a playground, supply input, invoke it, and see the result or error. The companion can invoke the skill through MCP with the same permissions. This lets the user exercise an application before connecting an external client.
+The user can select a published skill in a playground, supply input, invoke it, and see the result or error. Every skill result and reported skill error includes invocation metadata, even when tracing is disabled. The companion can invoke the skill through MCP with the same permissions. This lets the user exercise an application before connecting an external client.
 
 ## Inspect the application and its runs
 
-Through the cloud Console UI or through MCP, the user or companion can inspect published skills and their version, see active sessions, find previous runs, and examine a run's trace when tracing is enabled. Retained traces remain accessible to authorized users after engine replacement. The retention period is open. Longer-term error summaries, timing statistics, and dashboards are possible additions.
+Through the cloud Console UI or through MCP, the user or companion can inspect published skills and their version and see active sessions. Cloud run history covers invocations with a retained trace. Authorized users and their companions can look up those runs and inspect their traces, including after engine replacement. The retention period is open. Longer-term error summaries, timing statistics, and dashboards are possible additions.
 
 ## Proposed V1 demonstration
 
