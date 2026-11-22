@@ -16,17 +16,19 @@ The owner or companion can configure a shared executor once for the application.
 
 Cloud manages application-scoped variable values. Loomspan Framework owns variable-reference syntax and resolution.
 
-The owner and companion can prepare skills and runtime configuration, see how the skills fit together, distinguish staged work from the published version, and publish an update. The current version keeps serving until the update is ready. If publication fails, the owner can see the failure.
+The owner and companion can prepare skills and runtime configuration, see how the skills fit together, distinguish staged work from the published version, and publish an update. Before publishing, they can ask Framework to validate the staged pack and review any issues while the current version keeps serving. If publication fails, the owner can see the failure.
 
-The first V1 authoring milestone is upload and download of the complete skill pack and runtime configuration as one documented ZIP. The owner or companion can download the staged or published pack, upload it to another application's staging area, and publish it as a unit.
+The first V1 authoring milestone is upload and download of the complete skill pack and runtime configuration as one documented ZIP. The owner or companion can download a staged or published pack. An ordinary upload must match the target application's namespace.
 
-For example, an owner can publish and test changes in `orders_qa`, download the tested publication, and upload that same ZIP to `orders` for publication. The skills and configuration resolve their local references in the destination application, so moving the pack requires no namespace edits.
+Validation results belong to a specific staging revision. An upload identical to the current revision returns that revision. An older match requires confirmation to stage it again. For example, QA can review revision 7 while a developer uploads revision 8. If an authorized caller asks to publish revision 7, Cloud warns that revision 8 is current in staging. Only after the caller confirms does Cloud publish revision 7. Revision 8 stays staged.
+
+For example, an owner can test a publication in `orders_qa`, then use Console or MCP to promote that publication to `orders`. Go stages a derived pack with the executor configuration's owner namespace adjusted where needed. The owner or companion can review and publish the staged pack. The original QA publication remains available for download.
 
 The companion should have access to Framework's skill definitions and authoring guidance. A visual skill editor is a possible later addition.
 
 ## Try a published skill
 
-The user can select a published skill in a playground, supply input, invoke it, and see the result or error. Every skill result and reported skill error includes invocation metadata, even when tracing is disabled. The companion can invoke the skill through MCP with the same permissions. This lets the user exercise an application before connecting an external client.
+The user can select a published skill in a playground, supply input, invoke it, and see the result or error. Callers receive the skill result or reported error by default. Callers can request Framework’s execution view for every outcome or only when the invocation ends in a skill error. Both options work with tracing disabled. The companion can invoke the skill through MCP with the same permissions. This lets the user exercise an application before connecting an external client.
 
 ## Inspect the application and its runs
 

@@ -14,7 +14,7 @@ This structure supports our goal of building Loomspan Cloud as a modular system.
 
 Users create applications, submit work to them, and see how they are running. Loomspan Cloud manages where each application runs. Users and their AI companions can work entirely in terms of applications. It will use Loomspan Framework and Loomspan Extensions. We expect to organize the project into sub-projects, each responsible for one part of the cloud. The first three we envision are the execution engine, the administration UI, and the API.
 
-The [proposed architecture diagram](loomspan-cloud-architecture.png) shows how the cloud publishes applications, routes work, and returns diagnostics. Read its candidate labels against the V1 decisions below. We have selected K3s and hosted Supabase. The published configurations shown beside Postgres are tracked there by reference. The Go backend stores the ZIPs on a mounted filesystem, and engines write traces to a shared filesystem. The compute and filesystem providers remain open.
+The [architecture diagram](loomspan-cloud-architecture.png) shows the V1 component boundaries. Start component scoping at the [first single-engine milestone](java-execution-engine-roadmap.md#first-single-engine-milestone). The [Go roadmap](go-backend-roadmap.md) owns backend workflows, the [package specification](publication-package-format.md) defines valid archives, and the [V1 brief](v1-prototype-brief.md) describes the end-user demonstration.
 
 ### Guiding principle: an AI-first cloud
 
@@ -87,15 +87,13 @@ The Go management backend and Java engine authenticate each other with mutual TL
 
 ## Execution engine
 
-An execution engine is an internal Loomspan Cloud component that can run many tenants’ namespaces together. Each cloud application maps to a Framework namespace. We will build it in Java so it can use Loomspan Framework directly. We expect to embed the framework in an engine tailored to running inside Loomspan Cloud.
-
-The Java execution engine runs in a disposable K3s pod.
+The [Java execution engine roadmap](java-execution-engine-roadmap.md) owns the design of the disposable Spring Boot engine and its first single-engine milestone. The Go placement controller sends publications, the Console proxy observes installed versions, and the router sends authorized invocations. See the [engine integration contracts](java-execution-engine-roadmap.md#integration-contracts) for the responsibilities on each side of these exchanges.
 
 ### Cloud-managed engine lifecycle
 
-Framework handles cutover within a running engine. It prepares the replacement while the current generation serves. After a successful publish, new invocations use the new generation. Already admitted invocations finish with their captured generations, including for reachable child skills. If preparation or publication fails, the current version stays live and Cloud reports the failure to the owner.
+The engine delegates [single-engine publication and cutover](java-execution-engine-roadmap.md#publication-and-cutover) to Framework. Cloud reports the outcome to the owner.
 
-The Go backend keeps the original uploaded ZIP on a durable mounted filesystem. Each publication refers to an immutable ZIP containing the skills and runtime configuration. Supabase Postgres holds the application's publication history, the filesystem reference and status for each publication, and the identity of the current publication. This keeps the pack available for download and engine recovery independently of the engine cluster. Storing the original ZIP preserves the exact download for promotion between applications and keeps pack size and history from driving Supabase database usage.
+The Go backend keeps the original uploaded ZIP on a durable mounted filesystem. Each publication refers to an immutable ZIP containing the skills and runtime configuration. Supabase Postgres holds the application's publication history, the filesystem reference and status for each publication, and the identity of the current publication. This keeps the pack available for download and engine recovery independently of the engine cluster and keeps pack size and history from driving Supabase database usage.
 
 The cloud owns the policy for how namespaces run, decides which engines should host each namespace, and tracks which namespaces are actually installed on each engine.
 
@@ -117,9 +115,8 @@ On K3s, cert-manager will provision and rotate the mTLS certificates for communi
 
 ### Open questions for a Kubernetes deployment
 
-- **Capacity and replacement.** Would Loomspan request a replica count through a Kubernetes Deployment and let Kubernetes schedule and replace the pods? How would Loomspan discover and address a specific replacement engine?
-- **Readiness.** How would Loomspan know a new engine can receive configuration?
-- **Cluster recovery.** After cluster replacement, how would the cloud establish contact with new engines?
+- **Pod management.** A Kubernetes Deployment is a candidate for maintaining engine pods. Engine discovery and the two readiness checks are covered in the [Java startup contract](java-execution-engine-roadmap.md#startup-and-readiness).
+- **Cluster recovery.** How will a replacement cluster regain its credentials and mount the durable filesystems so the controller can restore applications?
 - **Application credentials.** What role, if any, would Kubernetes Secrets have in managing application credentials?
 
 ### Durable execution traces
@@ -128,13 +125,13 @@ When tracing is enabled, Cloud retains execution traces on a durable volume. Use
 
 Each engine pod mounts a shared persistent filesystem and writes traces there. A completed durable write must survive loss of the writing pod. Storage selection must also support access from a replacement cluster. The provider, concurrent write layout, and retention period are component design decisions. Whether publications and traces use the same storage service remains open.
 
-V1 Cloud run history covers invocations with a retained trace. Users and their companions can look up those runs and inspect their traces through Console or MCP with the user's application permissions. One proposed read path gives Go diagnostics read-only access to the trace filesystem.
+V1 Cloud run history covers invocations with a retained trace. Users and their companions can look up those runs and inspect their traces through Console or MCP with the user's application permissions. The [Go diagnostics roadmap](go-backend-roadmap.md#look-up-retained-traces) covers authorized reads from the trace filesystem and the proposed discovery index.
 
 ### Tenant isolation and shared capacity
 
 Application owners can publish skills and runtime configuration. Cloud enables only Loomspan extensions it has vetted and configured for the shared engine. Vetting an extension includes verifying that it keeps each tenant's supplied configuration, credentials, and data isolated when multiple applications use it in the same JVM.
 
-An application’s complete skill pack and runtime configuration travel together and are published as one version. References within the pack to the application itself are relative to the destination application, including in its configuration. Explicit references to shared executors and other external dependencies keep their targets.
+An application’s complete skill pack and runtime configuration travel together and are published as one version. The [Go backend roadmap](go-backend-roadmap.md#publication-promotion) describes how a publication is promoted to another application.
 
 Each application can configure a shared executor once for all its skills that use it.
 
@@ -188,13 +185,9 @@ The cloud Console proxy will consume the framework stream and enforce namespace 
 
 ### In-memory projection of observed engine state
 
-Within the Go management backend, only the Console proxy will open and read raw engine streams. It will use the backend's existing mTLS client credential to authenticate to each engine's Console endpoint. The proxy will maintain an in-memory projection of observed engine state. The rest of the management backend, including the placement controller, invocation router, and diagnostics services, will read that state through the projection.
+The [Go backend roadmap](go-backend-roadmap.md#console-proxy) describes the Console proxy's live engine view and the design questions for discovering retained traces.
 
-For each engine instance, the projection records the engine's reported state and installed Loomspan namespaces. For every namespace, including one that has never served an invocation, it records the active `generationId` and the optional `publicationVersion` reported by Console. The router selects an available engine whose confirmed `publicationVersion` for the target namespace matches the requested cloud publication.
-
-When running on Kubernetes, the cloud engine wrapper will read the pod name, Kubernetes namespace, and pod UID from environment variables populated by the Kubernetes Downward API. It will report these fields over the Console connection alongside an engine instance ID generated once at JVM startup. The pod UID identifies the pod across container restarts. A new engine instance ID tells the proxy that the JVM restarted, even in the same pod, so the replacement must confirm its own installed generations.
-
-The projection remains readable when a connection drops and marks that engine's last observation as disconnected. On connection or reconnection, the proxy reads `GET /_loomspan/observability/v1/instance` before treating placements as confirmed for routing. The response includes the process `instanceId` and a row for each installed namespace with its active `generationId` and `publicationVersion` (null if omitted). After a lost publication acknowledgment, a fresh snapshot lets the controller check whether the requested publication is active.
+Placement, routing, and diagnostics read the proxy's view of engine state. The [Java integration contracts](java-execution-engine-roadmap.md#integration-contracts) define the authenticated connection and instance snapshot.
 
 ## API
 
@@ -202,7 +195,7 @@ The API will let users submit work and will likely also provide status and metri
 
 ### Synchronous invocation
 
-In the first release, clients invoke an application synchronously. The API includes invocation metadata with every skill result and every reported skill error, even when tracing is disabled.
+In the first release, clients invoke an application synchronously. Callers can opt in to the [Framework execution view](java-execution-engine-roadmap.md#invocation-metadata) on each invocation, even when tracing is disabled.
 
 If the API cannot return an execution result, it will distinguish two outcomes.
 
