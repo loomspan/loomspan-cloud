@@ -79,11 +79,11 @@ MCP companions obtain their own tokens after the user approves the connection in
 
 In both models, the shared Cloud API checks permission to invoke the target application before routing to its namespace. The Java engine wrapper establishes the end user's identity and application roles in the Framework security context. Framework then enforces each skill's role requirements at entry and when calling child skills. Cloud separately enforces management permissions such as publishing the application or managing its users.
 
-Internal engine requests require authenticated Go client identity, including requests originating inside the engine pod. The [engine integration contracts](java-execution-engine-roadmap.md#integration-contracts) define transport authentication and invocation metadata.
+Internal engine requests require authenticated Go client identity, including requests originating inside the engine pod. The [engine integration contracts](execution-engine-api.md#integration-contracts) define transport authentication and invocation metadata.
 
 ## Execution engine
 
-The [Java execution engine roadmap](java-execution-engine-roadmap.md) owns the design of the disposable Spring Boot engine and its first single-engine milestone. The Go placement controller sends publications, the Console proxy observes installed versions, and the router sends authorized invocations. See the [engine integration contracts](java-execution-engine-roadmap.md#integration-contracts) for the responsibilities on each side of these exchanges.
+The [Java execution engine roadmap](java-execution-engine-roadmap.md) owns the design of the disposable Spring Boot engine and its first single-engine milestone. The Go placement controller sends publications, the Console proxy observes installed versions, and the router sends authorized invocations. See the [engine integration contracts](execution-engine-api.md#integration-contracts) for the responsibilities on each side of these exchanges.
 
 ### Cloud-managed engine lifecycle
 
@@ -167,7 +167,7 @@ An engine emits one Console stream across its namespaces. The Cloud proxy scopes
 
 ### In-memory projection of observed engine state
 
-Placement, routing, and diagnostics use the [Go proxy’s live engine view](go-backend-roadmap.md#console-proxy). The [engine integration contracts](java-execution-engine-roadmap.md#integration-contracts) define its snapshot and stream.
+Placement, routing, and diagnostics use the [Go proxy’s live engine view](go-backend-roadmap.md#console-proxy). The [engine integration contracts](execution-engine-api.md#integration-contracts) define its snapshot and stream.
 
 ## API
 
@@ -175,7 +175,7 @@ The API will let users submit work and will likely also provide status and metri
 
 ### Synchronous invocation
 
-In the first release, clients invoke an application synchronously. Callers can opt in to the [Framework execution view](java-execution-engine-roadmap.md#invocation-metadata) on each invocation, even when tracing is disabled.
+In the first release, clients invoke an application synchronously. Callers can opt in to the [Framework execution view](execution-engine-api.md#invocation-metadata) on each invocation, even when tracing is disabled.
 
 If the API cannot return an execution result, it will distinguish two outcomes.
 
