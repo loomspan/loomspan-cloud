@@ -16,7 +16,9 @@ The [execution engine API](execution-engine-api.md) defines the interface to Jav
 
 ## Upload and staged validation
 
-The Cloud API authorizes the upload and checks the ZIP against the [package contract](publication-package-format.md) before accepting it into the target application's staging area. It counts expanded bytes while reading the entries and reports the offending path, or both paths for a collision. A successful upload can be staged while the engine is offline.
+The Cloud API authorizes the upload and enforces the [archive rules and limits](publication-package-format.md#archive-rules) across the whole ZIP. It limits ZIP bytes at receipt, counts all entries including explicit directories, and counts actual expanded bytes as it reads every file, including companion assets. It checks entry types, path spelling and ambiguity, and case-insensitive path uniqueness. For an invalid entry it reports the offending path, or both paths for a collision.
+
+Before staging, the Cloud API checks the single destination namespace directory, the [companion entry point](publication-package-format.md#required-companion-entry-point), and the [execution subtree layout](publication-package-format.md#execution-inputs). It reads the authored execution configuration to reject reserved administrative sections and any executor configuration owner key that differs from the target namespace. A pack that passes these checks can be staged while the engine is offline. Staged validation can still report errors in the skill definitions, their references, or the execution configuration.
 
 The Cloud API computes SHA-256 over the exact ZIP bytes and compares the digest with revisions in the target application. A match with the current revision returns it and its validation results. A match only with an older revision returns a warning naming the matched and current revisions. Confirmation applies to that pair. If staging changes before confirmation, the Cloud API reevaluates the upload and refreshes the warning if needed.
 
@@ -34,7 +36,7 @@ For each installation, including restart and recovery, the Go backend reads the 
 
 The caller names the staging revision to publish. When accepting the publish request, the Cloud API compares it with the application's current staged revision. If they differ, the Cloud API returns a warning identifying both revisions and waits for explicit confirmation before dispatching the installation. Confirmation authorizes publication of the named, reviewed revision. The newer revision stays current in staging for continued work. Console and MCP use this same Cloud API operation.
 
-Before accepting a publish request, the Cloud API checks that the intended engine is ready and its Framework endpoint is reachable. If this check fails, the Cloud API reports the publish attempt as failed. The revision stays staged, the current publication pointer stays in place, and the owner can retry.
+Go can publish as soon as the Console proxy reads the first authenticated instance snapshot from the intended engine JVM. If the proxy lacks a snapshot from the current connection, the Cloud API reports the publish attempt as failed. The revision stays staged, the current publication pointer stays in place, and the owner can retry. Go can route invocations once the proxy confirms the requested namespace and publication version on an eligible engine.
 
 On engine recovery, the placement controller loads the version recorded as the application's current published version. Once a new version is durably marked published, it is the recovery target even if the engine goes down immediately afterward.
 
@@ -56,7 +58,7 @@ If preparation fails, the Cloud API reports the diagnostic and the previous gene
 
 An ordinary upload must match the selected application's namespace. The Cloud API reports a mismatch so the author can correct the pack. For promotion through Console or MCP, the caller selects a source publication and a destination application. the Cloud API checks access to the source and permission to stage changes at the destination.
 
-The Cloud API stages a destination pack derived from the selected publication. When present, it changes the owner key under `loomspan.executor-config` from the source namespace to the destination namespace. It preserves skill content, nested settings, and explicit references to shared executors and other external dependencies. If no edit is needed, the Cloud API can reuse the original ZIP. The staged pack identifies its source publication and exposes the namespace change for review. Publishing it uses the destination application's normal validation and publication flow.
+The Cloud API stages a destination pack derived from the selected publication. When the namespaces differ, it renames the ZIP's top-level directory to the destination namespace, updates the `name` in the companion `SKILL.md` frontmatter to match, and renames the source namespace's owner key under `loomspan.executor-config` in `loomspan/execution.yaml` if present. It preserves the companion instructions, Framework skill definitions, nested settings, and explicit references to shared executors and other external dependencies. If no edit is needed, the Cloud API can reuse the original ZIP. The staged pack identifies its source publication and exposes the namespace change for review. Publishing it uses the destination application's normal validation and publication flow.
 
 ## Future feature: client skill packs for invited users
 

@@ -103,7 +103,7 @@ On K3s, cert-manager will provision and rotate the mTLS certificates for communi
 
 ### Open questions for a Kubernetes deployment
 
-- **Pod management.** A Kubernetes Deployment is a candidate for maintaining engine pods. Engine discovery and the two readiness checks are covered in the [Java startup contract](java-execution-engine-roadmap.md#startup-and-readiness).
+- **Pod management.** A Kubernetes Deployment is a candidate for maintaining engine pods. Go can publish as soon as the Console proxy reads the first authenticated instance snapshot from the intended engine JVM. Go can route invocations once the proxy confirms the requested namespace and publication version on an eligible engine. Whether K3s needs a readiness probe for rollouts remains open. [Java startup contract](java-execution-engine-roadmap.md#startup-and-readiness)
 - **Cluster recovery.** How will a replacement cluster regain its credentials and mount the durable filesystems so the controller can restore applications?
 - **Application credentials.** What role, if any, would Kubernetes Secrets have in managing application credentials?
 

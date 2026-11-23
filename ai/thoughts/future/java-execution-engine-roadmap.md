@@ -10,15 +10,33 @@ The initial subproject is a standalone Maven build. Its Java 21 and Spring Boot 
 
 Implement the [shared execution engine API](execution-engine-api.md) in the Spring Boot wrapper.
 
+### Cloud ZIP adapter
+
+Validate and publish use the same adapter. Restore uses publish. Apply the [archive limits](publication-package-format.md#archive-rules) as the engine consumes the pack:
+
+- Enforce the whole-ZIP byte limit on the incoming multipart `pack` part as it arrives, before buffering the full part in memory.
+- Count every entry, including explicit directories. Enforce the entry limit before allocating an index for the entire archive.
+- Read in bounded chunks and check the cumulative expanded bytes before retaining each chunk. Skip companion contents where the reader permits. Count any bytes the reader expands while skipping an entry.
+
+Check that every entry has an unambiguous path under a single top-level directory matching the request's `namespace`. Reject a mismatch before passing documents to Framework. In the [execution subtree](publication-package-format.md#execution-inputs), require exactly one execution configuration and accept zero or more skill files. Reject unexpected files, nonregular execution inputs, and execution paths that collide when compared without regard to case. Pass each skill document to Framework with its authored pack-relative path. Framework validates the skill definitions, their references, and the composed execution configuration, including the executor configuration owner key.
+
 ### Startup and readiness
 
-Go discovers engine pods through the K3s Kubernetes API. The Java readiness probe succeeds when the engine can receive a publication, including when it has zero applications installed. The pod watch and the Console connection provide the discovery and observation paths for V1, so engines need no separate event bus or etcd registration.
+Go discovers engine pods through the K3s Kubernetes API. When the Console proxy reads its first authenticated instance snapshot from a newly discovered JVM, Go can immediately send that engine its first publication, even with zero Cloud applications installed. The pod watch and the Console connection provide the discovery and observation paths for V1, so engines need no separate event bus or etcd registration. Whether K3s needs a readiness probe for rollouts is a separate deployment decision.
 
 An application becomes eligible for routing on a ready, non-terminating pod once the Console proxy has confirmed the requested namespace and publication version on the connected JVM instance. Placement and routing read observed engine state from the proxy's in-memory projection.
 
 ### Planned engine shutdown
 
-When K3s begins a planned pod shutdown, the engine stops accepting new invocations and becomes unready. It rejects any invocation arriving after admission closes as rejected before execution, including requests already in transit from Go. Previously admitted invocations have a grace period to finish and return their results. Set the grace period when configuring the K3s deployment.
+V1 deliberately runs a single engine for testing and accepts downtime during engine restarts and replacements. While that engine is unavailable, Go returns a temporarily unavailable response to new invocations until an engine is eligible to serve the requested publication. This response is the expected V1 behavior. Defer work to maintain continuous availability, including overlapping engine pods and failover, to V2. [Go routing during shutdown](go-backend-roadmap.md#invocation-response-loss)
+
+When K3s begins a planned pod shutdown, the engine stops accepting new invocations and becomes unready. It rejects any invocation arriving after admission closes as rejected before execution, including requests already in transit from Go.
+
+Set `loomspan.shutdown.timeout=60s` for V1. When Framework closes admission, all previously admitted invocations share a single 60-second drain window. Each invocation keeps its original mission deadline. Shutdown can proceed as soon as all admitted invocations finish. Configure the K3s pod termination grace period to allow the full drain window plus time to deliver final responses and exit.
+
+Once Go observes that an engine pod is terminating, it stops sending publish and validate requests to that pod. In single-engine V1, Go tells the caller that the engine is shutting down, the request was not sent, and they can retry when the engine is available.
+
+For requests already dispatched, Go handles any engine response normally. If shutdown interrupts the response, Go tells a validation caller that the result is unavailable and validation can be retried. For a publish request, Go follows the [unconfirmed publication procedure](go-backend-roadmap.md#unconfirmed-publications) and tells the caller if it could not confirm installation during shutdown.
 
 ### Administrative runtime settings
 
@@ -74,11 +92,11 @@ Framework upgrades, including engine and proxy rollout order and access to retai
 
 ## First single-engine milestone
 
-Implement the Cloud ZIP adapter, validate and publish endpoints, K3s readiness probe, mTLS wiring, and Go integration in the Spring Boot host.
+Implement the Cloud ZIP adapter, validate and publish endpoints, mTLS wiring, and Go integration in the Spring Boot host.
 
-Start with an empty, ready engine and a pack using Framework defaults. Publish the pack with an empty value map and the application’s effective runtime settings. Before the first invocation, verify the success response triggers a proxy refresh and routing sees the requested namespace and version on the expected JVM. Verify a failed replacement leaves the previous version serving. Restart the engine and confirm the saved publication on the new JVM.
+Start an engine with zero Cloud applications installed. Have the Go Console proxy read its first `GET /_loomspan/observability/v1/instance` snapshot using mTLS and the environment’s Console API key. Immediately send a pack using Framework defaults through the engine’s publish endpoint with an empty value map and the application’s effective runtime settings. Assert that the first publish request succeeds. Before the first invocation, verify the success response triggers a proxy refresh and routing sees the requested namespace and version on the JVM identified by the first snapshot. Verify a failed replacement leaves the previous version serving. Restart the engine and confirm the saved publication on the new JVM.
 
-Test the [validate and publish responses](execution-engine-api.md#validate-and-publish-responses) with an invalid staged pack and a publication exception. Verify the proxy can fetch the instance snapshot with mTLS and the environment’s Console API key. In the invocation milestone, test the [execution-view modes](execution-engine-api.md#invocation-metadata) on success and skill error with tracing disabled.
+Test the [validate and publish responses](execution-engine-api.md#validate-and-publish-responses) with an invalid staged pack and a publication exception. In the invocation milestone, test the [execution-view modes](execution-engine-api.md#invocation-metadata) on success and skill error with tracing disabled.
 
 ## After V1: engine capacity
 

@@ -4,7 +4,7 @@ A V1 publication pack contains the companion instructions, complete Framework sk
 
 ## Directory layout
 
-Every entry belongs to one top-level directory. Its name matches the companion skill's `name` and can stay the same across deployments. Keeping this directory in the ZIP preserves the open Agent Skills layout when unpacked. All paths below are relative to this directory. [Agent Skills specification](https://agentskills.io/specification)
+Every entry belongs to one top-level directory named for the destination application's namespace. The companion skill's `name` must match that directory name. Keeping this directory in the ZIP preserves the open Agent Skills layout when unpacked. All paths below are relative to this directory. [Agent Skills specification](https://agentskills.io/specification)
 
 ```text
 order-support/
