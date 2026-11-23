@@ -8,21 +8,21 @@ A user signs in by email magic link and can create an application. The applicati
 
 Users can authorize an MCP companion in their browser. The companion receives its own tokens and can reconnect across sessions with the user’s current permissions. Token lifetimes remain open.
 
-V1 uses hosted Supabase Auth for sign-in and hosted Supabase Postgres solely for Loomspan Cloud’s own platform data, including application memberships and role assignments.
-
 ## Prepare and publish skills
 
 The owner or companion can configure a shared executor once for the application. Every skill in the application that uses that executor can reuse those settings.
 
-Cloud manages application-scoped variable values. Loomspan Framework owns variable-reference syntax and resolution.
+In Console administration, owners can change trace persistence, view the Cloud-managed session limits, and see which settings are active or pending. Saved changes to variables and settings take effect together on the next successful publication. [Runtime settings and defaults](java-execution-engine-roadmap.md#administrative-runtime-settings)
+
+Owners can choose **Restart application** to apply saved edits using the current published pack.
 
 The owner and companion can prepare skills and runtime configuration, see how the skills fit together, distinguish staged work from the published version, and publish an update. Before publishing, they can ask Framework to validate the staged pack and review any issues while the current version keeps serving. If publication fails, the owner can see the failure.
 
-The first V1 authoring milestone is upload and download of the complete skill pack and runtime configuration as one documented ZIP. The owner or companion can download a staged or published pack. An ordinary upload must match the target application's namespace.
+The first V1 authoring milestone is upload and download of the portable skill pack as one documented ZIP. The owner or companion can download a staged or published pack. An ordinary upload must match the target application's namespace.
 
-Validation results belong to a specific staging revision. An upload identical to the current revision returns that revision. An older match requires confirmation to stage it again. For example, QA can review revision 7 while a developer uploads revision 8. If an authorized caller asks to publish revision 7, Cloud warns that revision 8 is current in staging. Only after the caller confirms does Cloud publish revision 7. Revision 8 stays staged.
+The owner can review one staging revision while a developer uploads another. Publishing the reviewed revision requires confirmation when a newer revision is staged. The newer work stays available. [Staging and publication workflow](go-backend-roadmap.md#upload-and-staged-validation)
 
-For example, an owner can test a publication in `orders_qa`, then use Console or MCP to promote that publication to `orders`. Go stages a derived pack with the executor configuration's owner namespace adjusted where needed. The owner or companion can review and publish the staged pack. The original QA publication remains available for download.
+An owner can promote a tested QA publication to production through Console or MCP, review the staged pack, and download the original QA publication. [Promotion workflow](go-backend-roadmap.md#publication-promotion)
 
 The companion should have access to Framework's skill definitions and authoring guidance. A visual skill editor is a possible later addition.
 
@@ -32,7 +32,7 @@ The user can select a published skill in a playground, supply input, invoke it, 
 
 ## Inspect the application and its runs
 
-Through the cloud Console UI or through MCP, the user or companion can inspect published skills and their version and see active sessions. Cloud run history covers invocations with a retained trace. Authorized users and their companions can look up those runs and inspect their traces, including after engine replacement. The retention period is open. Longer-term error summaries, timing statistics, and dashboards are possible additions.
+Through the cloud Console UI or through MCP, the user or companion can inspect published skills and their version and see active sessions. Cloud run history covers invocations with a retained trace. Authorized users and their companions can look up those runs and inspect their traces, including after engine replacement. Cloud will revisit [retention and cleanup](roadmap.md#durable-execution-traces) after observing V1 usage. Longer-term error summaries, timing statistics, and dashboards are possible additions.
 
 ## Proposed V1 demonstration
 
