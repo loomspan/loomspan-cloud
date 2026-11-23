@@ -71,7 +71,7 @@ We prefer one authentication strategy across the web UI, REST, and MCP wherever 
 Each cloud application has an owner who manages access to it. Cloud will support two ways to invoke the application on behalf of an end user.
 
 - **Direct authentication.** The owner defines application roles and can assign them to an email address before the user first signs in. The user gains those roles when they verify that address through the V1 magic link. Verified email identifies the user for membership purposes across supported sign-in methods. Cloud stores memberships and roles per application in Supabase and checks them when the user invokes the application.
-- **Authentication by a calling application.** An application that uses Loomspan Cloud as its AI execution engine can authenticate its own end users and determine their roles. Its backend authenticates to Cloud and supplies the end user's identity and roles with each invocation. Cloud accepts those roles only from a backend the owner has authorized to assert them for the target application.
+- **Authentication by a calling application.** An application that uses Loomspan Cloud as its AI execution engine can authenticate its own end users and determine their roles. Its backend authenticates to Cloud and supplies its own stable ID for the end user along with that user's roles on each invocation. Cloud accepts the ID and roles only from a backend the owner has authorized to assert them for the target application. The user ID is scoped to that backend.
 
 ### Relationship to other components
 

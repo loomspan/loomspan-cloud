@@ -46,6 +46,8 @@ When an owner grants a user access to a published application, Go could generate
 
 ## Invocation response loss
 
+When Java responds, Go receives the full [invoke response](java-execution-engine-roadmap.md#invoke-responses), including available exception details on failure and the execution view when requested for that outcome and available. The Go service will define which details its caller-facing interfaces expose.
+
 Go removes a terminating engine from routing as soon as it observes shutdown. In single-engine V1, new requests receive a temporarily unavailable response while there is no eligible engine. If forced pod termination cuts off the result of a dispatched invocation, the same unknown-outcome rule below applies. [Engine shutdown contract](java-execution-engine-roadmap.md#planned-engine-shutdown)
 
 An unconfirmed result after dispatch is an unknown outcome. Go does not automatically retry. [Synchronous invocation outcomes](roadmap.md#synchronous-invocation)
@@ -62,7 +64,7 @@ On Go startup or Console reconnection, the placement controller compares each in
 
 Recovery proceeds per namespace. As soon as the proxy confirms an application's intended publication on a ready engine, the router can send it new requests, even while other namespaces are still restoring. If one restore fails, Go reports that application's failure and continues restoring the remaining namespaces. Already-confirmed applications keep serving.
 
-When Java reports a failure, Go uses the engine's machine-readable error code to decide whether to retry and its technical details to compose the message for the user or companion. Go retries transient restore failures automatically with backoff. If restoration requires an owner action, such as supplying a missing variable or correcting a [Vertex connection](java-execution-engine-roadmap.md#tenant-vertex-ai-credentials), Go pauses automatic retries for that namespace and shows the reason. After correcting the configuration, the owner can select **Restart application** to retry the current publication.
+For a failed restore, Go shows the message returned by Java exactly as received. The owner can select **Restart application** to retry the current publication. [Validate and publish responses](java-execution-engine-roadmap.md#validate-and-publish-responses)
 
 In V1 the router sends work only to intended placements. If Console reports an additional namespace, reconciliation leaves it loaded and excludes that placement from routing. Explicitly unassigning an application from an engine and unloading its namespace are deferred until Cloud supports multiple engine runtimes.
 
