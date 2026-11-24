@@ -56,13 +56,15 @@ Cloud supplies the following session limits explicitly on each publish request. 
 | --- | ---: |
 | Mission timeout | 60 seconds |
 | Maximum call depth | 32 |
-| Maximum size per attachment | 20 MiB |
+| Framework maximum size per attachment | 20 MiB |
 | Skill invocations per session | 64 |
 | Tool invocations per session | 128 |
 | Linter retries per session | 32 |
 | Model calls per session | 64 |
 | Provider attempts per session, including retries | 192 |
 | Usage units per session | 200,000 |
+
+Go owns the [Cloud invoke request limits](go-backend-roadmap.md#invocation-response-visibility). The attachment setting above applies to individual attachments within Framework.
 
 Size the Go response timeout and pod shutdown grace period independently. A caller timeout ends the wait for a result, and the pod grace period bounds planned shutdown.
 
@@ -82,7 +84,7 @@ Exercise both JSON forms, a missing declaration with engine credentials availabl
 
 For an application restart, the wrapper prepares and publishes a fresh Framework generation even when the requested publication version is already installed. Console exposes the resulting generation ID for the [restart confirmation in Go](go-backend-roadmap.md#restarting-an-application).
 
-**Settled decision for invocation cutover.** Go routes to an eligible engine. Framework captures the active generation when it accepts an invocation and retains the captured generations for that invocation and its reachable child skills. An invocation already in transit at cutover uses the replacement if Framework first captures its generation after publication. This requires no additional cutover coordination in Go.
+**V1 invocation cutover.** Go routes each invocation to an eligible engine. Framework runs the invocation on the generation active in its namespace when Framework accepts it. Work already accepted finishes on its captured generation, including reachable child skills. Once a replacement is active, Framework uses it for every newly accepted invocation, including requests already in transit. This rule applies to every input shape and transport. Go and the Java wrapper leave generation selection to Framework.
 
 The wrapper adapts the ZIP to Framework skill documents and execution configuration, supplies the value map, private visibility, and the assigned version to `SkillReloader.prepare`, then publishes the prepared update. The current generation keeps serving during preparation and after a failed update. Publishing zero YAML skill documents removes previously published YAML skills and leaves the namespace installed.
 
@@ -100,9 +102,13 @@ Implement the Cloud ZIP adapter, validate and publish endpoints, mTLS wiring, an
 
 Start an engine with zero Cloud applications installed. Have the Go Console proxy read its first `GET /_loomspan/observability/v1/instance` snapshot using mTLS and the environment’s Console API key. Immediately send a pack using Framework defaults through the engine’s publish endpoint with an empty value map and the application’s effective runtime settings. Assert that the first publish request succeeds. Before the first invocation, verify the success response triggers a proxy refresh and routing sees the requested namespace and version on the JVM identified by the first snapshot. Verify a failed replacement leaves the previous version serving. Then publish a new version and terminate the pod after Go receives `204` but before Console observes the update. Verify Go restores that version on the replacement and sends it the first invocation only after Console confirms the namespace and version on the new JVM.
 
-That first invocation must execute a real skill from the restored publication on the replacement JVM. Verify that the caller receives the skill's expected result through Go.
+That first invocation must execute a real, deterministic skill from the restored publication on the replacement JVM. The ticket writer chooses a fixture with a known input and expected output that runs without an external model call. Verify that the caller receives that expected output through Go.
 
-Test the [validate and publish responses](execution-engine-api.md#validate-and-publish-responses) with an invalid staged pack and a publication exception. In the invocation milestone, test the [execution-view modes](execution-engine-api.md#invocation-metadata) on success and skill error with tracing disabled.
+Test the [validate and publish responses](execution-engine-api.md#validate-and-publish-responses) with an invalid staged pack and a publication exception. In the invocation milestone, test success and skill error with trace persistence set to `NEVER`. Verify that the administrator's [execution-view switch](execution-engine-api.md#invocation-metadata) controls whether the invoker receives `executionView` in each case and the available `debug` and `diagnosis` fields on failure.
+
+## After V1: Loomspan test suite
+
+The first follow-on project after Cloud V1 is a Loomspan test suite in a separate repository. It will provide repeatable integration tests for Framework and Cloud as both evolve. V1 tickets in this repository cover their focused milestone checks.
 
 ## After V1: engine capacity
 

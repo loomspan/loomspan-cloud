@@ -28,15 +28,15 @@ The companion should have access to Framework's skill definitions and authoring 
 
 ## Invoke a published skill
 
-Users can invoke a published skill through REST or through their companion over MCP. [Invocation response visibility](go-backend-roadmap.md#invocation-response-visibility)
+Users can invoke a published skill through REST or through their companion over MCP. An application administrator controls whether each invoker automatically receives the available execution view on success or failure. The same switch controls whether the invoker receives debug output and structured diagnosis on failure. It defaults to off for new applications. [Invocation response visibility](go-backend-roadmap.md#invocation-response-visibility)
 
 ## Inspect the application and its runs
 
-Through the cloud Console UI or through MCP, the user or companion can inspect published skills and their version and see active sessions. Cloud run history covers invocations with a retained trace. Authorized users and their companions can look up those runs and inspect their traces, including after engine replacement. Cloud will revisit [retention and cleanup](roadmap.md#durable-execution-traces) after observing V1 usage. Longer-term error summaries, timing statistics, and dashboards are possible additions.
+Through the cloud Console UI or through MCP, the user or companion can inspect published skills and their version. Cloud run history covers invocations with a retained trace. Only application administrators and companions acting with their permissions can inspect live sessions and events, browse retained runs, or review and download their traces, including after engine replacement. Cloud will revisit [retention and cleanup](roadmap.md#durable-execution-traces) after observing V1 usage. Longer-term error summaries, timing statistics, and dashboards are possible additions.
 
 ## Proposed V1 demonstration
 
 An owner signs in, connects a companion, creates an application, and grants a second user a role that permits skill invocation. The owner and companion stage a skill pack and publish it.
 
-- **Application permissions.** The second user can invoke the published skill through REST, and their companion can invoke it through MCP. Cloud denies both callers permission to publish an update or read traces for an application they have no access to.
-- **Inspect a run.** With tracing enabled, several users invoke the same skill. A user with diagnostics access asks their companion to find the retained trace for their invocation and explain the result.
+- **Application permissions.** The second user can invoke the published skill through REST, and their companion can invoke it through MCP. Invocation permission alone grants neither caller access to live events or retained traces, even when the administrator enables execution views.
+- **Inspect a run.** With tracing enabled, several users invoke the same skill. An application administrator asks their companion to find the retained trace for a particular invocation and explain the result.

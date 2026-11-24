@@ -10,7 +10,7 @@ V1 runs one Go backend deployment. Its four internal components share the Consol
 | **Cloud API** | Handles caller-facing requests and authorization, including administration of application settings and roles, uploads, validation, and publication requests. |
 | **Console proxy** | Maintains the Framework Console connections and the observed state of engine pods, JVMs, namespaces, and publication versions. |
 | **Placement controller** | Reconciles intended placements with the Console proxy's observations, publishes or restores applications, and confirms the intended publications are serving. |
-| **Router** | Selects an eligible engine for an authorized invocation using the intended placement and the Console proxy's observations. |
+| **Router** | Selects an eligible engine for an authorized invocation using the intended placement and the Console proxy's observations. Framework handles [invocation cutover](java-execution-engine-roadmap.md#publication-and-cutover). |
 
 The [execution engine API](execution-engine-api.md) defines the interface to Java.
 
@@ -35,6 +35,8 @@ If engine validation is unavailable, interrupted, or blocked by an unreadable re
 If the pack is otherwise valid, report that it passed validation and identify the variables blocking publication. Once the owner supplies them, they can publish the same revision directly. Publication checks the current values.
 
 Validation describes the combination of staged revision and administrative settings used for the check. If settings change before publication, the engine checks the combination it actually installs. The Go backend keeps the settings sent for a publication distinguishable from subsequent edits so Console can show the confirmed active settings even if an edit arrives during installation. [Administrative runtime settings](java-execution-engine-roadmap.md#administrative-runtime-settings)
+
+Go reads the application's active trace persistence policy from `tracePersistencePolicy` on the matching namespace entry in a fresh authenticated instance snapshot. Console compares that observed policy with the owner's saved selection. A fresh snapshot supplies the active policy after a Go restart or a lost publish response. To confirm that a particular restart completed, Go still applies the [JVM and generation checks](#restarting-an-application).
 
 ### Publishing a reviewed revision
 
@@ -89,9 +91,11 @@ When an owner grants a user access to a published application, the Cloud API cou
 
 ## Invocation response visibility
 
+Go alone enforces the V1 request limits for REST and MCP invocations before dispatch to Java. The caller's invoke request body may contain up to 20 MiB (20,971,520 bytes) in total and up to 25 uploaded files. Both limits are inclusive. Count the entire JSON or multipart body, including metadata, file contents, part headers, and boundaries. Each uploaded file part counts once, including an empty file. The JSON metadata part counts only toward the byte limit. If either limit is exceeded, Go rejects the request before dispatch.
+
 The Cloud API applies the same V1 rule to REST and MCP. With permission to invoke the application, callers receive the exact `result` on success or the engine’s top-level `message` verbatim and any top-level input-validation `issues` on failure. Caller-friendly error categories and rewritten messages are deferred to V2. [Engine response fields](execution-engine-api.md#invoke-responses)
 
-Access to `debug`, `diagnosis`, `executionView`, and retained traces requires diagnostics access for the application. If a caller requests an execution view without that access, Go rejects the request before dispatch and explains that the caller can invoke the skill without requesting a view.
+One application administrator setting controls `executionView`, `debug`, and `diagnosis` in REST and MCP invoke responses. It defaults to off for new applications. When enabled, Go automatically returns the execution view for the invoker's own call on success or failure and includes the available `debug` and `diagnosis` fields on failure. When disabled, Go omits all three fields even if the invoker asks for them. The switch applies independently of trace persistence.
 
 ## Invocation response loss
 
@@ -113,14 +117,14 @@ After a failed restore, the owner can select [Restart application](#restarting-a
 
 In V1 the router sends work only to intended placements. If the Console proxy observes an additional namespace, the placement controller leaves it loaded and the router excludes it from routing. Explicitly unassigning an application from an engine and unloading its namespace are deferred until Cloud supports multiple engine runtimes.
 
-The Console proxy consumes streams from engines that can host several applications. The Cloud API authorizes each user's or companion's access and the Console proxy exposes live data scoped to the authorized application namespace.
+The Console proxy consumes streams from engines that can host several applications. Only application administrators and companions acting with their permissions can inspect live system events. The Cloud API enforces that permission and the Console proxy scopes the stream to the authorized application namespace.
 
 ### Look up retained traces
 
-Engines write retained traces to a persistent filesystem. The Console proxy reads those files for authorized historical lookups, including after the producing engine has been replaced. Users can browse runs with retained traces and open the trace for a particular invocation.
+Engines write retained traces to a persistent filesystem. The Console proxy reads those files for authorized historical lookups, including after the producing engine has been replaced. Only application administrators and companions acting with their permissions can browse retained runs or look up, review, and download traces for that application.
 
 **Proposed V1 design.** Scan finalized files on startup and build an in-memory index using the entry namespace, root skill, trace ID, start time, elapsed time, outcome, and file location. Index the trace under the initiating application even when child calls appear in it. Load the trace payload when an authorized caller opens it. A trace-completion notification could prompt a refresh, with periodic scans to discover missed files and reconcile index entries for files that have disappeared.
 
-For each completed file in an entry-namespace directory, read `persistencePolicy` and `errored` from its terminal `TRACE_COMPLETED` record. Index `ALWAYS` traces and `ONERROR` traces with `errored: true`. Skip `NEVER` traces and `ONERROR` traces with `errored: false`, including files still present during Console’s completion grace period. The recorded policy belongs to that run and remains authoritative across application settings changes. Verify application access before serving an indexed trace. [Writer completion signal](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces)
+For each completed file in an entry-namespace directory, read `persistencePolicy` and `errored` from its terminal `TRACE_COMPLETED` record. Index `ALWAYS` traces and `ONERROR` traces with `errored: true`. Skip `NEVER` traces and `ONERROR` traces with `errored: false`, including files still present during Console’s completion grace period. The recorded policy belongs to that run and remains authoritative across application settings changes. Verify administrator permission for the application before serving an indexed trace. [Writer completion signal](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces)
 
 Verify that an authorized lookup identifies the correct retained trace when several callers invoke the same skill concurrently.

@@ -111,7 +111,7 @@ On K3s, cert-manager will provision and rotate the mTLS certificates for communi
 
 ### Durable execution traces
 
-Authorized users and companions can inspect saved traces, including after engine or cluster replacement.
+Application administrators and companions acting with their permissions can look up, review, and download saved traces, including after engine or cluster replacement.
 
 Each engine pod mounts a shared persistent filesystem with the [entry-namespace trace layout](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces). Verify that completed durable writes survive pod loss and that a replacement cluster can access them. The trace volume must support simultaneous writes from engine pods on different K3s nodes and reads from the Go proxy. Storage provider selection and whether traces and publications share a service remain open.
 
@@ -161,7 +161,7 @@ The UI will give users a view of their running applications. The status informat
 
 ## Loomspan Console in the cloud
 
-Signed-in users should have the full capabilities of Loomspan Console for the applications they are authorized to access. That boundary applies both to the data they can see, including trace records, and to the applications they can debug and manage. It must hold when several tenants share an execution engine.
+Application administrators can use Loomspan Console to inspect live system events and retained traces for their applications. Companions use the same administrator permissions. The Console proxy enforces this boundary. It must hold when several tenants share an execution engine.
 
 ### Relationship to other components
 
@@ -177,7 +177,7 @@ The API will let users submit work and will likely also provide status and metri
 
 ### Synchronous invocation
 
-In the first release, clients invoke an application synchronously. Callers with diagnostics access can request an execution view even when tracing is disabled. [Invocation response visibility](go-backend-roadmap.md#invocation-response-visibility)
+In the first release, clients invoke an application synchronously. An application administrator controls whether invokers automatically receive the available execution view for their own call on success or failure. The same switch controls whether invokers receive the available `debug` and `diagnosis` fields on failure. It defaults to off for new applications and works independently of trace persistence. [Invocation response visibility](go-backend-roadmap.md#invocation-response-visibility)
 
 If the API cannot return an execution result, it will distinguish two outcomes.
 

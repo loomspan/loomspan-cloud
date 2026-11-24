@@ -8,7 +8,7 @@ This document defines the V1 interface between the Go backend and the Java execu
 | --- | --- | --- |
 | Validate a staged pack | Go sends the staged ZIP, target namespace, and destination application’s effective runtime settings at the owner or companion's request. | The wrapper calls `SkillReloader.validate` with the skill documents, execution configuration, and private visibility. Framework checks the complete candidate, including skill references, without creating provider clients or activating a generation. Java returns Framework diagnostics, preserving source paths when available. |
 | Publish a pack or restore a publication | The Go placement controller sends the original ZIP, the target namespace, the Cloud-assigned opaque `publicationVersion`, the required `variableValues` map, and the effective runtime settings to the engine's internal API. | The Java wrapper publishes the supplied skill definitions and composed configuration into the target namespace. Go can confirm the version through Console before routing work. Restoration reuses the saved ZIP and version with the target application’s current variables and effective runtime settings at restore time. |
-| Observe an engine | The Go Console proxy connects to the engine and reads `GET /_loomspan/observability/v1/instance` at connection and reconnection, then consumes the engine stream. | The snapshot identifies the JVM instance and lists active namespaces with their Framework-local `generationId` and Cloud publication version, even before first invocation. Observing the requested change can confirm a publish whose acknowledgment was lost. The Console proxy maintains the observations used by the placement controller and router. |
+| Observe an engine | The Go Console proxy connects to the engine and reads `GET /_loomspan/observability/v1/instance` at connection and reconnection, then consumes the engine stream. | Each active namespace entry reports `generationId`, `publicationVersion`, and `tracePersistencePolicy` from the same generation, even before first invocation. Go reads the application's active policy from its namespace entry. The top-level policy describes the default namespace. The Console proxy maintains the observations used by the placement controller and router, including confirmation of a publish whose acknowledgment was lost. |
 | Invoke a skill | The Cloud API authorizes the caller for the application. The router sends the authorized namespace, local skill name, and input to a confirmed engine. | Java sets the Framework security context from the separate `caller` object and returns the [invoke response](#invoke-responses). |
 
 Go and Java authenticate each other using mTLS on the internal API and Console connection. For Console requests, every engine also enforces Framework's existing API-key check. A Kubernetes Secret supplies the same Console API key to the Go proxy and every engine in that environment. Development, QA, and production each use their own key.
@@ -27,7 +27,7 @@ Go sends three synchronous HTTPS requests over the authenticated mTLS connection
 | --- | --- |
 | `POST /internal/v1/validate` | Multipart pack and JSON metadata containing `namespace` and `runtimeSettings`. Staged validation does not require variable values. |
 | `POST /internal/v1/publish` | Multipart pack and JSON metadata containing `namespace`, `runtimeSettings`, `publicationVersion`, and `variableValues`. For publication, Java requires a non-null `variableValues` map with exactly one nonblank value per distinct referenced name, including an empty map for a reference-free pack. |
-| `POST /internal/v1/invoke` | A JSON or multipart [invoke request](#invoke-requests) with `namespace`, `skill`, `input`, and the [caller object](#invocation-identity-and-roles). The optional `executionView` field accepts `always` or `on_error`. Omit it to invoke without an observer. |
+| `POST /internal/v1/invoke` | A JSON or multipart [invoke request](#invoke-requests) with `namespace`, `skill`, `input`, and the [caller object](#invocation-identity-and-roles). Go sends `executionView: "always"` when the administrator enables execution views and omits the field otherwise. |
 
 Validate and publish use `multipart/form-data` with two named parts. The [Java ZIP adapter](java-execution-engine-roadmap.md#cloud-zip-adapter) receives the `pack` part, which contains the original ZIP bytes as `application/zip`. The `metadata` part contains the JSON object as `application/json`. Restore and restart use the same publish endpoint with the saved ZIP and publication version, the application's current variable values, and its current effective runtime settings.
 
@@ -59,6 +59,10 @@ For both validate and publish, Go sends the complete effective settings for the 
 All fields shown inside `runtimeSettings` are required. Encode depth and quotas as JSON integers, timeout as a duration string, and maximum attachment size as a size string with an explicit unit (`20971520B` is 20 MiB). Go supplies the application's selected persistence policy: `NEVER`, `ONERROR`, or `ALWAYS`. The Java wrapper reads the portable configuration from the ZIP and adds `session` and `execution-trace` under `loomspan` to build one in-memory Framework configuration. The trace directory comes from engine startup configuration.
 
 ### Invoke requests
+
+JSON and multipart invocations both follow the [V1 invocation cutover rule](java-execution-engine-roadmap.md#publication-and-cutover).
+
+Go enforces the [caller-facing byte and file-count limits](go-backend-roadmap.md#invocation-response-visibility) before sending the internal invoke request. The Java wrapper relies on that check.
 
 Go sends the authorized application’s `namespace` and the skill’s `localName` from validation or the catalog in the `skill` field. Java passes the two components separately to `SkillTemplate.invoke`. The required `input` object holds the skill’s named arguments. Use `{}` when there are no ordinary input fields.
 
@@ -124,8 +128,8 @@ Example failure with a requested view:
 
 V1 does not support caller-requested cancellation. Once an invocation starts, it continues under Framework's normal execution limits if the caller disconnects or times out while waiting for the response.
 
-Go forwards the authorized execution-view mode to Java. When the mode is omitted, Java invokes the skill without an observer and omits `executionView` from the response. For `always` and `on_error`, Java captures Framework's `SkillExecutionView` through the observer.
+Go derives the internal execution-view mode from the application's administrator-controlled switch on each invocation. The switch defaults to off for new applications. When off, Go omits the field and Java invokes without an observer and omits `executionView` from the response.
 
-With `always`, every invoke response includes `executionView`. With `on_error`, an error response includes the field and a successful response omits it. A recovered internal error followed by a normal return counts as success.
+When the switch is on, Go sends `always`. Java captures Framework's `SkillExecutionView` through the observer and includes `executionView` on success and error. Go returns the view to the invoker automatically and includes the available `debug` and `diagnosis` fields on failure. When the switch is off, Go omits all three fields from the caller-facing response. REST and MCP callers cannot override the switch.
 
 When the response calls for the field, Java sends the complete view (session ID and events) if it received one, or `"executionView": null` otherwise. This covers rejection before a session starts and failures that prevent Framework from delivering the view during finalization or mapping. An unavailable view leaves the invocation's result or error details and HTTP status unchanged. View delivery is independent of trace retention.
