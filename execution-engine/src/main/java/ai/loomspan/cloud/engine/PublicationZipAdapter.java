@@ -43,11 +43,12 @@ final class PublicationZipAdapter {
     private static final int UNIX_TYPE_MASK = 0170000;
     private static final int UNIX_REGULAR = 0100000;
     private static final int UNIX_DIRECTORY = 0040000;
-    private static final String EXECUTION_PATH = "loomspan/execution.yaml";
+    static final String EXECUTION_PATH = "loomspan/execution.yaml";
     private static final Charset LEGACY_ZIP_CHARSET = Charset.forName("IBM437");
     private static final MediaType ZIP_MEDIA_TYPE = MediaType.valueOf("application/zip");
-    private static final LoadSettings YAML_SETTINGS = LoadSettings.builder()
+    static final LoadSettings YAML_SETTINGS = LoadSettings.builder()
             .setCodePointLimit(MAX_EXPANDED_BYTES)
+            .setAllowNonScalarKeys(true)
             .setSchema(new CoreSchema())
             .build();
 
