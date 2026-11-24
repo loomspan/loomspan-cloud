@@ -18,7 +18,7 @@ Owners can choose **Restart application** to apply saved edits using the current
 
 The owner and companion can prepare skills and runtime configuration, see how the skills fit together, distinguish staged work from the published version, and publish an update. Before publishing, they can ask Framework to validate the staged pack and review any issues while the current version keeps serving. If publication fails, the owner can see the failure.
 
-The first V1 authoring milestone is upload and download of the portable skill pack as one documented ZIP. The owner or companion can download a staged or published pack. An ordinary upload must match the target application's namespace.
+The first V1 authoring milestone is upload and download of the portable skill pack as one [publication ZIP](publication-package-format.md). The owner or companion can download a staged or published pack. [Go upload checks](go-backend-roadmap.md#zip-checks-before-staging)
 
 The owner can review one staging revision while a developer uploads another. Publishing the reviewed revision requires confirmation when a newer revision is staged. The newer work stays available. [Staging and publication workflow](go-backend-roadmap.md#upload-and-staged-validation)
 
@@ -26,9 +26,9 @@ An owner can promote a tested QA publication to production through Console or MC
 
 The companion should have access to Framework's skill definitions and authoring guidance. A visual skill editor is a possible later addition.
 
-## Try a published skill
+## Invoke a published skill
 
-The user can select a published skill in a playground, supply input, invoke it, and see the result or error. Callers receive the skill result or reported error by default. Callers can request Framework’s execution view for every outcome or only when the invocation ends in a skill error. Both options work with tracing disabled. The companion can invoke the skill through MCP with the same permissions. This lets the user exercise an application before connecting an external client.
+Users can invoke a published skill through REST or through their companion over MCP. [Invocation response visibility](go-backend-roadmap.md#invocation-response-visibility)
 
 ## Inspect the application and its runs
 
@@ -38,5 +38,5 @@ Through the cloud Console UI or through MCP, the user or companion can inspect p
 
 An owner signs in, connects a companion, creates an application, and grants a second user a role that permits skill invocation. The owner and companion stage a skill pack and publish it.
 
-- **Application permissions.** The second user can invoke the published skill in the playground, and their companion can invoke it through MCP. Cloud denies both callers permission to publish an update or read traces for an application they have no access to.
-- **From result to trace.** With tracing enabled, several users invoke the same skill. From a particular playground result, an authorized user can open the trace for that exact invocation or ask their companion to find it and explain the result.
+- **Application permissions.** The second user can invoke the published skill through REST, and their companion can invoke it through MCP. Cloud denies both callers permission to publish an update or read traces for an application they have no access to.
+- **Inspect a run.** With tracing enabled, several users invoke the same skill. A user with diagnostics access asks their companion to find the retained trace for their invocation and explain the result.

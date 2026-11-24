@@ -1,6 +1,6 @@
 # Application variable conformance checks
 
-Use Framework’s `loomspan-variable-fixtures/` corpus to check Cloud’s ZIP reader and Go variable discovery. Each case includes authored documents and an `expected.json` file. Compare distinct names and each occurrence’s pack-relative source and path. Include mapping-key markers, aliases, excluded fields, malformed names, and effective-key collisions. The corpus README specifies traversal order, name whitespace rules, and diagnostic path formatting.
+Use Framework’s `loomspan-variable-fixtures/` corpus to check how the [Java ZIP adapter](java-execution-engine-roadmap.md#cloud-zip-adapter) preserves skill source paths and how [Go discovers variable references](go-backend-roadmap.md#publishing-a-reviewed-revision). Each case includes authored documents and an `expected.json` file. Compare distinct names and each occurrence’s pack-relative source and path. Include mapping-key markers, aliases, excluded fields, malformed names, and effective-key collisions. The corpus README specifies traversal order, name whitespace rules, and diagnostic path formatting.
 
 The `worked` pack contains six occurrences across two files. Go should read four application values: `provider.key`, `app.region`, `records.url`, and `records.lookup-path`. The region is shared across the provider and executor configuration. The lookup path appears only in the executor-backed skill. Install this pack with one entry per name and verify that the provider and executor receive their expected values.
 

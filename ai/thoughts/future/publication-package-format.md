@@ -2,12 +2,14 @@
 
 A V1 publication pack contains the companion instructions, complete Framework skill set, and execution configuration for one application. V1 requires neither a manifest nor a version file inside the archive. Cloud records `formatVersion: 1` outside the ZIP.
 
+[Go upload checks](go-backend-roadmap.md#zip-checks-before-staging) · [Java ZIP adapter checks](java-execution-engine-roadmap.md#cloud-zip-adapter)
+
 ## Directory layout
 
-Every entry belongs to one top-level directory named for the destination application's namespace. The companion skill's `name` must match that directory name. Keeping this directory in the ZIP preserves the open Agent Skills layout when unpacked. All paths below are relative to this directory. [Agent Skills specification](https://agentskills.io/specification)
+The ZIP’s top-level directory and the companion’s `SKILL.md` frontmatter `name` both equal the destination application’s namespace. Paths below are relative to that directory. [Agent Skills specification](https://agentskills.io/specification)
 
 ```text
-order-support/
+u42-order-support/
   SKILL.md
   references/
     order-statuses.md
@@ -25,7 +27,7 @@ order-support/
 
 ```markdown
 ---
-name: order-support
+name: u42-order-support
 description: Look up an order and explain its status to a support representative.
 ---
 
@@ -41,11 +43,17 @@ Only these files are allowed under `loomspan/`. Each must be a valid document of
 | Path | Count | Contents |
 | --- | --- | --- |
 | `loomspan/execution.yaml` | Exactly one | The portable configuration for connections, models, and executor settings. Use `loomspan: {}` for an empty configuration, including in a pack with zero skills. Any namespace key under `loomspan.executor-config` must match the target application. |
-| `loomspan/skills/**/*.yaml` | Zero or more | One Framework skill definition per file, directly under `skills/` or nested to any depth. Its source label for diagnostics is the full pack-relative path, such as `loomspan/skills/orders/find-order.yaml`. |
+| `loomspan/skills/**/*.yaml` | Zero or more | One Framework skill per file. Every directory and filename in a skill definition’s pack-relative path must be lowercase. Report the full path and the offending component on a spelling error. |
 
-Cloud reserves the entire `loomspan.session` and `loomspan.execution-trace` sections for administrative application settings. Import rejects either key, including an empty section, and reports its path in `loomspan/execution.yaml`. Downloads contain the portable pack. Promotion uses the destination application's administrative settings.
+`loomspan.session` and `loomspan.execution-trace` are reserved for administrative settings. Either key, even with an empty section, makes `loomspan/execution.yaml` invalid. Downloads contain the portable pack. Promotion uses the destination application's administrative settings.
 
-The YAML uses Framework's authored configuration and reference syntax. Literal values are allowed wherever the underlying field accepts them. The declared skill name identifies the skill within its namespace and is case-sensitive. Distinct files can declare `Orders` and `orders`. Declaring the same exact skill name twice is invalid.
+Literal values are allowed wherever the underlying Framework field accepts them.
+
+### Namespace and skill names
+
+A namespace and a local skill name each match `[a-z][a-z0-9]*(?:-[a-z0-9]+)*`, contain 1–64 ASCII characters, and exclude the substrings `anthropic` and `claude`. Validate names as written. Each skill must satisfy `length(namespace) + 2 + length(localName) <= 64` and have a unique local name within its namespace.
+
+In authored YAML, `find-order` refers to the skill in the owning namespace. A qualified reference names both components explicitly, as in `u42-order-support:find-order`.
 
 ### Application variables
 

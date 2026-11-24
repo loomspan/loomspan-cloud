@@ -16,57 +16,84 @@ The [execution engine API](execution-engine-api.md) defines the interface to Jav
 
 ## Upload and staged validation
 
-The Cloud API authorizes the upload and enforces the [archive rules and limits](publication-package-format.md#archive-rules) across the whole ZIP. It limits ZIP bytes at receipt, counts all entries including explicit directories, and counts actual expanded bytes as it reads every file, including companion assets. It checks entry types, path spelling and ambiguity, and case-insensitive path uniqueness. For an invalid entry it reports the offending path, or both paths for a collision.
+### ZIP checks before staging
 
-Before staging, the Cloud API checks the single destination namespace directory, the [companion entry point](publication-package-format.md#required-companion-entry-point), and the [execution subtree layout](publication-package-format.md#execution-inputs). It reads the authored execution configuration to reject reserved administrative sections and any executor configuration owner key that differs from the target namespace. A pack that passes these checks can be staged while the engine is offline. Staged validation can still report errors in the skill definitions, their references, or the execution configuration.
+Go authorizes the upload and checks the entire archive against the [package limits](publication-package-format.md#archive-rules). It caps the incoming ZIP bytes, counts every entry including explicit directories, and counts actual expanded bytes while reading every file, including companion assets. It rejects nonregular files, entry types other than files and directories, ambiguous paths, and paths that collide without regard to case. Report the offending path, or both paths for a collision.
+
+Go requires one top-level directory matching the destination namespace, the [companion entry point](publication-package-format.md#required-companion-entry-point), and the [execution subtree layout](publication-package-format.md#execution-inputs), including lowercase skill paths. In `loomspan/execution.yaml`, reject reserved administrative sections and any executor configuration owner key that differs from the destination namespace. Report the offending field and its pack-relative source. A pack that passes these checks can be staged while the engine is offline.
+
+### Staging revisions and validation
 
 The Cloud API computes SHA-256 over the exact ZIP bytes and compares the digest with revisions in the target application. A match with the current revision returns it and its validation results. A match only with an older revision returns a warning naming the matched and current revisions. Confirmation applies to that pair. If staging changes before confirmation, the Cloud API reevaluates the upload and refreshes the warning if needed.
 
 A confirmed restaging creates a new current revision referencing the same stored ZIP. Validation results stay with their original revision. Previously unseen ZIP bytes create a new revision after upload checks pass. The Cloud API makes the comparison and staging update atomically so concurrent identical uploads resolve to one revision. A rejected upload creates no revision and preserves the current revision and its validation results. A pack staged by promotion follows the same rules.
 
-Through Console or MCP, an authorized caller can request validation of a specific revision. The Cloud API associates the engine's validation result and diagnostics with the requested revision, even if another upload arrived during validation. A validation error leaves the pack available for inspection and the current publication serving. Corrections go through the same upload checks.
+Through Console or MCP, an authorized caller can validate a specific staged revision. Go runs all independent checks it can complete, including engine validation of the authored pack even when application variables are missing or blank. It returns the engine diagnostics, all missing or blank variable references (with pack-relative source and authored YAML path), and any other pack issues found by Cloud in one result. The result belongs to the requested revision even if another upload arrives. The pack stays staged and the current publication keeps serving.
+
+If engine validation is unavailable, interrupted, or blocked by an unreadable request, Go includes that outcome and every available finding in the same caller-facing result. The result identifies any checks that could not complete.
+
+If the pack is otherwise valid, report that it passed validation and identify the variables blocking publication. Once the owner supplies them, they can publish the same revision directly. Publication checks the current values.
 
 Validation describes the combination of staged revision and administrative settings used for the check. If settings change before publication, the engine checks the combination it actually installs. The Go backend keeps the settings sent for a publication distinguishable from subsequent edits so Console can show the confirmed active settings even if an edit arrives during installation. [Administrative runtime settings](java-execution-engine-roadmap.md#administrative-runtime-settings)
 
 ### Publishing a reviewed revision
 
-During staged validation and before each install, the Go backend discovers references in the selected ZIP using the [package variable syntax](publication-package-format.md#application-variables). Report missing or blank variables with their pack-relative source and authored YAML path.
+Before each install, Go checks the selected ZIP’s [variable references](publication-package-format.md#application-variables) and reports any missing or blank values with their pack-relative source and authored YAML path.
 
-For each installation, including restart and recovery, the Go backend reads the destination application’s current values for those names, computes its effective runtime settings from current saved selections and Cloud defaults, and uses the [publish endpoint](execution-engine-api.md#internal-api-requests). The ZIP is the durable record of its requirements.
+When starting a publication, restart, or recovery, Go reads the destination application’s current values for those names, computes its effective runtime settings from saved selections and Cloud defaults, and uses the [publish endpoint](execution-engine-api.md#internal-api-requests). The ZIP is the durable record of its requirements.
 
 The caller names the staging revision to publish. When accepting the publish request, the Cloud API compares it with the application's current staged revision. If they differ, the Cloud API returns a warning identifying both revisions and waits for explicit confirmation before dispatching the installation. Confirmation authorizes publication of the named, reviewed revision. The newer revision stays current in staging for continued work. Console and MCP use this same Cloud API operation.
 
+If the owner selects **Publish** for the staged revision that is already the application's current publication, the Cloud API reports “This revision is already published.” It returns without creating a publication version or dispatching an installation. To apply saved variables or runtime settings to that revision, the owner selects [Restart application](#restarting-an-application).
+
 Go can publish as soon as the Console proxy reads the first authenticated instance snapshot from the intended engine JVM. If the proxy lacks a snapshot from the current connection, the Cloud API reports the publish attempt as failed. The revision stays staged, the current publication pointer stays in place, and the owner can retry. Go can route invocations once the proxy confirms the requested namespace and publication version on an eligible engine.
 
-On engine recovery, the placement controller loads the version recorded as the application's current published version. Once a new version is durably marked published, it is the recovery target even if the engine goes down immediately afterward.
+On receiving `204 No Content` from Java, Go durably records the acknowledged version as the application's current published version before reporting publish success to the caller. If the pod dies before Console observes that version, the placement controller restores it on the replacement. Routing resumes only after a fresh Console snapshot confirms the namespace and version on the eligible replacement JVM.
 
 ### Unconfirmed publications
 
-If the placement controller loses the publish response after dispatch, it requests an immediate snapshot refresh from the Console proxy and watches for the requested change for up to 30 seconds. For a new publication, confirmation means observing the requested namespace and version on the intended engine. For a restart, use the [generation check](#restarting-an-application). If the window expires, report the version as unconfirmed, explain that it may still complete, and offer an explicit retry if that version is still intended.
+**Retry** means “finish the publication I requested.” Go records the application’s retry revision when it accepts a publish or restart. Saving a variable or runtime setting, or accepting another publish or restart (even for the same version), advances that revision. An edit followed by a reversal still closes the earlier retry. Staging another ZIP or changing roles or unrelated metadata leaves the revision unchanged.
 
-The placement controller serializes the retry with other publish operations for the application. Before dispatch, it checks that the requested version is still the application's current publication target. If a newer target has superseded it, the Cloud API rejects the retry and identifies the current target to the owner. Restoring the older version requires a separate, deliberate publish as a downgrade. If the target still matches, the placement controller checks the Console proxy's latest snapshot and reports success if the original change is now visible. Otherwise it sends the publish request again.
+If the placement controller loses the publish response after dispatch, it requests an immediate snapshot refresh from the Console proxy and watches for the requested change for the configured confirmation window (30 seconds in V1). For a new publication, confirmation means observing the requested namespace and version on the intended engine. For a restart, use the [restart confirmation rule](#restarting-an-application). If the window expires, report the version as unconfirmed, explain that it may still complete, and offer an explicit retry if the request’s retry revision is still current.
+
+Go reconciles durably recorded publish and restart requests after a backend restart and after the caller's confirmation window expires. Before restoring the previous current publication, Go checks a fresh authenticated snapshot from the intended engine. If it confirms the requested installation, Go records the confirmed publication as current without requiring the caller to retry. Seeing a distinct new publication version in the requested namespace confirms a new publication. For a same-version restart, apply the generation and JVM checks below.
+
+In the same Postgres transaction that records the confirmed publication as current, Go verifies that no newer publish or restart request has been accepted for that application. Invocations can proceed under the normal routing rules and do not supersede the publication request.
+
+If Go accepts a newer publish or restart for the same application while the earlier installation is unconfirmed, it holds the newer request until the earlier installation is confirmed or 30 seconds past the end of its configured confirmation window, whichever comes first. Go measures that deadline from the start of the earlier request's confirmation wait (60 seconds total with the V1 setting). Once the deadline passes, Go can dispatch the newer request even if the earlier installation is still unconfirmed.
+
+Framework rejects an earlier candidate as stale if the newer generation becomes active after the earlier candidate captured its base generation. V1 accepts the remaining risk that a delayed earlier request can first enter preparation after the newer generation is active and replace it on the engine. Go still applies the current-publication transaction check above.
+
+On retry, the Cloud API checks the caller’s current permission. Go serializes the revision check and dispatch with changes that advance the application’s retry revision. If the revision has changed, Go sends nothing to the engine and tells the caller why the retry is closed. Otherwise, the placement controller checks the latest Console snapshot. If it confirms the original request, Go reports success. If confirmation is still missing, Go resends the original ZIP and publication version with the unchanged variable values and effective runtime settings.
 
 ### Restarting an application
 
-Saving variables or administrative settings leaves the running generation unchanged. The next successful publication applies both. An owner can choose **Restart application** to republish the current ZIP and version with the saved edits. Other applications keep serving.
+Saving variables or administrative settings leaves the running generation unchanged. An owner can choose **Restart application** to republish the current ZIP and version with the saved edits. Other applications keep serving.
 
-The placement controller serializes restart and publish operations per application. Before dispatching a restart, it records the connected JVM's `instanceId`, the application's current `generationId`, and its `publicationVersion`. After Java reports success, it asks the Console proxy for a fresh snapshot. It reports the restart complete once the Console proxy observes the same namespace and publication version with a different generation ID on the same JVM.
+The placement controller serializes restarts and publishes per application. Before dispatch, it reads a fresh Console snapshot and records the JVM’s `instanceId` and the namespace’s `generationId` if present. After Java reports success, Go requests another snapshot from the same JVM to confirm the current published version:
 
-If preparation fails, the Cloud API reports the diagnostic and the previous generation keeps serving. If the response is lost, the placement controller follows the [publish confirmation rule](#unconfirmed-publications). Generation IDs are process-local. A changed instance ID triggers engine recovery and fresh placement confirmation.
+- If the namespace was present, confirm that it serves the requested version with a different `generationId`.
+- If the namespace was absent, confirm that it now appears with the requested version.
+
+If preparation fails, the Cloud API reports the diagnostic and any previously active generation keeps serving. If the response is lost, the placement controller follows the [publish confirmation rule](#unconfirmed-publications). Generation IDs are process-local. A changed instance ID triggers engine recovery and fresh placement confirmation.
 
 ## Publication promotion
 
-An ordinary upload must match the selected application's namespace. The Cloud API reports a mismatch so the author can correct the pack. For promotion through Console or MCP, the caller selects a source publication and a destination application. the Cloud API checks access to the source and permission to stage changes at the destination.
+An ordinary upload must match the selected application’s namespace. For promotion through Console or MCP, the caller selects a source publication and destination application. The Cloud API checks access to the source and permission to stage at the destination.
 
-The Cloud API stages a destination pack derived from the selected publication. When the namespaces differ, it renames the ZIP's top-level directory to the destination namespace, updates the `name` in the companion `SKILL.md` frontmatter to match, and renames the source namespace's owner key under `loomspan.executor-config` in `loomspan/execution.yaml` if present. It preserves the companion instructions, Framework skill definitions, nested settings, and explicit references to shared executors and other external dependencies. If no edit is needed, the Cloud API can reuse the original ZIP. The staged pack identifies its source publication and exposes the namespace change for review. Publishing it uses the destination application's normal validation and publication flow.
+When the namespaces differ, Go renames the ZIP’s top-level directory, the companion’s `SKILL.md` frontmatter `name`, and the `loomspan.executor-config` owner key if present. It preserves the companion instructions, skill definitions, nested settings, and explicit external references. Check every local skill name against the [combined length limit](publication-package-format.md#namespace-and-skill-names) using the destination namespace before staging. If no edit is needed, Go can reuse the original ZIP. The staged revision identifies its source publication and exposes the namespace change for review. The destination’s normal validation and publication flow applies.
 
 ## Future feature: client skill packs for invited users
 
 When an owner grants a user access to a published application, the Cloud API could generate a client-only skill pack for that user's companion. It would derive the download from the published ZIP using the package format's export rules. The companion would use `SKILL.md` as its entry point and invoke the application through the user's authorized Cloud connection. The Cloud API would check the user's current permissions on each call. [Client-only export contract](publication-package-format.md#client-only-export)
 
-## Invocation response loss
+## Invocation response visibility
 
-The Cloud API defines what its caller-facing interfaces expose from the [engine's invoke response](execution-engine-api.md#invoke-responses).
+The Cloud API applies the same V1 rule to REST and MCP. With permission to invoke the application, callers receive the exact `result` on success or the engine’s top-level `message` verbatim and any top-level input-validation `issues` on failure. Caller-friendly error categories and rewritten messages are deferred to V2. [Engine response fields](execution-engine-api.md#invoke-responses)
+
+Access to `debug`, `diagnosis`, `executionView`, and retained traces requires diagnostics access for the application. If a caller requests an execution view without that access, Go rejects the request before dispatch and explains that the caller can invoke the skill without requesting a view.
+
+## Invocation response loss
 
 The router removes a terminating engine from routing as soon as it observes shutdown. In single-engine V1, new requests receive a temporarily unavailable response while there is no eligible engine. If forced pod termination cuts off the result of a dispatched invocation, the same unknown-outcome rule below applies. [Engine shutdown contract](java-execution-engine-roadmap.md#planned-engine-shutdown)
 
@@ -82,7 +109,7 @@ On Go backend startup or Console reconnection, the placement controller compares
 
 Recovery proceeds per namespace. As soon as the Console proxy confirms an application's intended publication on a ready engine, the router can send it new requests, even while other namespaces are still restoring. If one restore fails, the Cloud API reports that application's failure while the placement controller continues restoring the remaining namespaces. Already-confirmed applications keep serving.
 
-After a failed restore, the owner can select **Restart application** to retry the current publication. [Validate and publish responses](execution-engine-api.md#validate-and-publish-responses)
+After a failed restore, the owner can select [Restart application](#restarting-an-application) to install the current publication with the latest saved variables and settings.
 
 In V1 the router sends work only to intended placements. If the Console proxy observes an additional namespace, the placement controller leaves it loaded and the router excludes it from routing. Explicitly unassigning an application from an engine and unloading its namespace are deferred until Cloud supports multiple engine runtimes.
 
@@ -96,4 +123,4 @@ Engines write retained traces to a persistent filesystem. The Console proxy read
 
 For each completed file in an entry-namespace directory, read `persistencePolicy` and `errored` from its terminal `TRACE_COMPLETED` record. Index `ALWAYS` traces and `ONERROR` traces with `errored: true`. Skip `NEVER` traces and `ONERROR` traces with `errored: false`, including files still present during Console’s completion grace period. The recorded policy belongs to that run and remains authoritative across application settings changes. Verify application access before serving an indexed trace. [Writer completion signal](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces)
 
-**Open integration question.** Framework's optional execution view exposes a session ID, and retained trace records also carry it. Verify exact-run lookup for concurrent invocations and decide how the playground obtains the lookup identifier when the view is omitted or requested only on error. The existing trace start and completion records already carry the entry identity and timestamps needed for the proposed listing.
+Verify that an authorized lookup identifies the correct retained trace when several callers invoke the same skill concurrently.

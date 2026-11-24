@@ -6,10 +6,10 @@ This document defines the V1 interface between the Go backend and the Java execu
 
 | Integration | Caller and input | Receiver and observable outcome |
 | --- | --- | --- |
-| Validate a staged pack | Go sends the staged ZIP, target namespace, and destination application’s effective runtime settings at the owner or companion's request. | The wrapper uses the same ZIP adapter as publication and calls `SkillReloader.validate` with the skill documents, execution configuration, and private visibility. Framework checks the complete candidate, including skill references, without creating provider clients or activating a generation. Java returns Framework diagnostics, preserving source paths when available. |
-| Publish a pack or restore a publication | The Go placement controller sends the original ZIP, the target namespace, the Cloud-assigned opaque `publicationVersion`, the required `variableValues` map, and the effective runtime settings to the engine's internal API. | The Java wrapper reads the complete skill pack and runtime configuration and publishes into the supplied namespace. Go can confirm the version through Console before routing work. Restoration reuses the saved ZIP and version with the target application’s current variables and effective runtime settings at restore time. |
+| Validate a staged pack | Go sends the staged ZIP, target namespace, and destination application’s effective runtime settings at the owner or companion's request. | The wrapper calls `SkillReloader.validate` with the skill documents, execution configuration, and private visibility. Framework checks the complete candidate, including skill references, without creating provider clients or activating a generation. Java returns Framework diagnostics, preserving source paths when available. |
+| Publish a pack or restore a publication | The Go placement controller sends the original ZIP, the target namespace, the Cloud-assigned opaque `publicationVersion`, the required `variableValues` map, and the effective runtime settings to the engine's internal API. | The Java wrapper publishes the supplied skill definitions and composed configuration into the target namespace. Go can confirm the version through Console before routing work. Restoration reuses the saved ZIP and version with the target application’s current variables and effective runtime settings at restore time. |
 | Observe an engine | The Go Console proxy connects to the engine and reads `GET /_loomspan/observability/v1/instance` at connection and reconnection, then consumes the engine stream. | The snapshot identifies the JVM instance and lists active namespaces with their Framework-local `generationId` and Cloud publication version, even before first invocation. Observing the requested change can confirm a publish whose acknowledgment was lost. The Console proxy maintains the observations used by the placement controller and router. |
-| Invoke a skill | The Cloud API authorizes the caller for the application. The router selects a confirmed engine and sends the namespace, skill, and input. Caller identity and application roles travel separately from skill input. | The Java wrapper sets the Framework security context, invokes the namespace-qualified skill, and returns the [invoke response](#invoke-responses) to Go. |
+| Invoke a skill | The Cloud API authorizes the caller for the application. The router sends the authorized namespace, local skill name, and input to a confirmed engine. | Java sets the Framework security context from the separate `caller` object and returns the [invoke response](#invoke-responses). |
 
 Go and Java authenticate each other using mTLS on the internal API and Console connection. For Console requests, every engine also enforces Framework's existing API-key check. A Kubernetes Secret supplies the same Console API key to the Go proxy and every engine in that environment. Development, QA, and production each use their own key.
 
@@ -29,7 +29,7 @@ Go sends three synchronous HTTPS requests over the authenticated mTLS connection
 | `POST /internal/v1/publish` | Multipart pack and JSON metadata containing `namespace`, `runtimeSettings`, `publicationVersion`, and `variableValues`. For publication, Java requires a non-null `variableValues` map with exactly one nonblank value per distinct referenced name, including an empty map for a reference-free pack. |
 | `POST /internal/v1/invoke` | A JSON or multipart [invoke request](#invoke-requests) with `namespace`, `skill`, `input`, and the [caller object](#invocation-identity-and-roles). The optional `executionView` field accepts `always` or `on_error`. Omit it to invoke without an observer. |
 
-Validate and publish use `multipart/form-data` with two named parts. The `pack` part contains the original ZIP bytes as `application/zip`. The `metadata` part contains the JSON object as `application/json`. Restore and restart use the same publish endpoint with the saved ZIP and publication version, the application's current variable values, and its current effective runtime settings.
+Validate and publish use `multipart/form-data` with two named parts. The [Java ZIP adapter](java-execution-engine-roadmap.md#cloud-zip-adapter) receives the `pack` part, which contains the original ZIP bytes as `application/zip`. The `metadata` part contains the JSON object as `application/json`. Restore and restart use the same publish endpoint with the saved ZIP and publication version, the application's current variable values, and its current effective runtime settings.
 
 ### Runtime settings
 
@@ -60,7 +60,7 @@ All fields shown inside `runtimeSettings` are required. Encode depth and quotas 
 
 ### Invoke requests
 
-Go sends the qualified, case-sensitive `skill` name returned by validation or the catalog. Java checks that the name belongs to the authorized `namespace`. The required `input` object holds the skill's named arguments, including text, nested objects, arrays, and other JSON values accepted by the skill. Use `{}` when there are no ordinary input fields.
+Go sends the authorized application’s `namespace` and the skill’s `localName` from validation or the catalog in the `skill` field. Java passes the two components separately to `SkillTemplate.invoke`. The required `input` object holds the skill’s named arguments. Use `{}` when there are no ordinary input fields.
 
 For `application/json`, the request object is the entire body. For `multipart/form-data`, send that object in one required `application/json` part named `request`, with zero or more binary file parts. A multipart request containing only `request` behaves like a JSON request. When uploading files, include a `files` array in the request object. Each entry names the multipart `part` and gives its destination `path` as a JSON Pointer relative to `input`.
 
@@ -68,8 +68,8 @@ For example, the following `request` part accompanies two binary parts named `in
 
 ```json
 {
-  "namespace": "claims",
-  "skill": "claims-reviewInvoices",
+  "namespace": "u42-claims",
+  "skill": "review-invoices",
   "caller": { "issuer": "partner-portal", "subject": "user-123", "roles": ["reviewer"] },
   "input": { "question": "Do these invoices match the claim?" },
   "files": [
@@ -83,11 +83,13 @@ Java uses the skill's declared input shape to construct missing object or array 
 
 ## Validate and publish responses
 
-When Framework completes validation, Java returns `200 OK` with a JSON object containing `valid`, `issues`, and `skills` from `SkillValidationResult`. Each issue carries `severity`, `sourceName`, and `message`, plus `skillName` and `fieldPath` when available. Each validated skill has its qualified `name` and `kind`. Warnings alone leave `valid` true. If any issue has severity `ERROR`, the response is still `200 OK`, with `valid: false`, the issues, and an empty `skills` array.
+For staged validation, Java runs every independent wrapper and Framework check it can complete. It returns their findings together in the `200 OK` validation result with `valid`, `issues`, and `skills`. An authored Vertex credential-policy violation is a structured issue. Java continues checking unrelated skill references when they can be validated. Each issue carries `severity`, `sourceName`, and `message`, plus `skillName` and `fieldPath` when available. Each validated skill carries `namespace`, `localName`, and `kind`. Warnings alone leave `valid` true. Any `ERROR` yields `valid: false` and an empty `skills` array.
 
-After Framework's `publish` method returns successfully, Java responds with `204 No Content`. Go refreshes the Console snapshot to confirm the active generation.
+After Framework's `publish` method returns successfully, Java responds with `204 No Content`. [Go publication handling](go-backend-roadmap.md#publishing-a-reviewed-revision)
 
-If Framework throws during validation, preparation, or publication, Java returns a non-success HTTP status with the exception message as the `text/plain` response body. The same rule applies when the Java wrapper rejects the ZIP or request metadata. Go passes the message to the authorized caller exactly as received. If the response is lost after dispatch, Go follows the [publish confirmation and retry rule](go-backend-roadmap.md#unconfirmed-publications).
+If a validation check fails partway through, Java preserves every finding already collected and includes the failure message in the same result. If the wrapper rejects the ZIP or request metadata before validation can begin, Java returns a non-success HTTP status with the message as `text/plain`. Go includes that message verbatim alongside its own findings in the caller's validation result.
+
+For publish, a rejected ZIP or request metadata, or an exception during preparation or publication, yields a non-success HTTP status with the message as `text/plain`. Go passes the message to the authorized caller exactly as received. If the publish response is lost after dispatch, Go follows the [publish confirmation and retry rule](go-backend-roadmap.md#unconfirmed-publications).
 
 ## Invocation identity and roles
 
@@ -104,7 +106,7 @@ Every response Java sends from `POST /internal/v1/invoke` has an `application/js
 
 For invoke, Java reserves `503 Service Unavailable` for a confirmed rejection before the skill started, including when a request reaches an engine that has closed admission during shutdown. The JSON `message` explains the rejection. Go uses the status alone as confirmation when it receives the authenticated engine's response. If Go loses contact after dispatch or receives only an intermediary's error, the execution outcome is unknown.
 
-**Implementation note for both examples below.** These examples illustrate field placement. Java must send Go all available invocation result or failure details, including Framework details absent from the examples. The sample debug output is abbreviated for readability. Send it in full in the implementation. Go owns the separate decision about what to expose to its callers.
+**Implementation note for both examples below.** These examples illustrate field placement. Java must send Go all available invocation result or failure details, including Framework details absent from the examples. The sample debug output is abbreviated for readability. Send it in full in the implementation. Go applies the [caller visibility rule](go-backend-roadmap.md#invocation-response-visibility).
 
 Example success with a requested view:
 
@@ -122,7 +124,7 @@ Example failure with a requested view:
 
 V1 does not support caller-requested cancellation. Once an invocation starts, it continues under Framework's normal execution limits if the caller disconnects or times out while waiting for the response.
 
-Go forwards the caller's execution-view mode to Java. When the mode is omitted, Java invokes the skill without an observer and omits `executionView` from the response. For `always` and `on_error`, Java captures Framework's `SkillExecutionView` through the observer.
+Go forwards the authorized execution-view mode to Java. When the mode is omitted, Java invokes the skill without an observer and omits `executionView` from the response. For `always` and `on_error`, Java captures Framework's `SkillExecutionView` through the observer.
 
 With `always`, every invoke response includes `executionView`. With `on_error`, an error response includes the field and a successful response omits it. A recovered internal error followed by a normal return counts as success.
 

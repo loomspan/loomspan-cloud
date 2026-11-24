@@ -12,13 +12,15 @@ Implement the [shared execution engine API](execution-engine-api.md) in the Spri
 
 ### Cloud ZIP adapter
 
-Validate and publish use the same adapter. Restore uses publish. Apply the [archive limits](publication-package-format.md#archive-rules) as the engine consumes the pack:
+Validate and publish share this adapter. Restart and restore use publish. The [package format](publication-package-format.md#archive-rules) defines the byte and entry limits.
 
 - Enforce the whole-ZIP byte limit on the incoming multipart `pack` part as it arrives, before buffering the full part in memory.
 - Count every entry, including explicit directories. Enforce the entry limit before allocating an index for the entire archive.
-- Read in bounded chunks and check the cumulative expanded bytes before retaining each chunk. Skip companion contents where the reader permits. Count any bytes the reader expands while skipping an entry.
+- Read in bounded chunks. Before retaining each chunk, check the cumulative bytes expanded by the reader against the expanded-size limit. Skip companion file contents when the reader supports it. Count any bytes it expands to skip them.
 
-Check that every entry has an unambiguous path under a single top-level directory matching the request's `namespace`. Reject a mismatch before passing documents to Framework. In the [execution subtree](publication-package-format.md#execution-inputs), require exactly one execution configuration and accept zero or more skill files. Reject unexpected files, nonregular execution inputs, and execution paths that collide when compared without regard to case. Pass each skill document to Framework with its authored pack-relative path. Framework validates the skill definitions, their references, and the composed execution configuration, including the executor configuration owner key.
+Check every entry’s path for ambiguity and require a single top-level directory matching the request’s `namespace`. Under `loomspan/`, enforce the [execution layout](publication-package-format.md#execution-inputs), including lowercase skill paths. Reject nonregular execution inputs and case-insensitive execution path collisions. Independently reject reserved sections in `loomspan/execution.yaml` and report their paths. Pass each skill’s pack-relative path to Framework as its `SkillDocument.sourceName`.
+
+Framework validates the skill definitions, their references, and the composed execution configuration, including the executor configuration owner key.
 
 ### Startup and readiness
 
@@ -42,8 +44,8 @@ For requests already dispatched, Go handles any engine response normally. If shu
 
 | Component | Responsibility |
 | --- | --- |
-| Cloud administration and Go backend | Own the destination application's administrative settings, defaults, allowed choices, and permissions. On import, reject reserved sections with their pack-relative paths. For validation or publication, compute one complete set of effective settings from Cloud policy and the application's saved selections. Send that set separately from the portable ZIP. Console shows owners which settings are active and which edits are pending. |
-| Cloud Java wrapper in the execution engine | Accept the settings from the authenticated Go backend. Check the ZIP independently for reserved sections and reject missing or invalid administrative settings. Construct one in-memory Framework execution configuration from the portable sections and Cloud's supplied session and trace settings. Call `SkillReloader.validate` for a staged check, or the private, versioned, explicit-map `prepare` overload followed by `publish` for publication. Include the offending path in the message when rejecting a reserved pack field or an invalid administrative setting. |
+| Cloud administration and Go backend | Own the destination application's administrative settings, defaults, allowed choices, and permissions. For validation or publication, compute one complete set of effective settings from Cloud policy and the application's saved selections. Send that set separately from the portable ZIP. Console shows owners which settings are active and which edits are pending. |
+| Cloud Java wrapper in the execution engine | Accept the settings from the authenticated Go backend. Reject missing or invalid administrative settings. Construct one in-memory Framework execution configuration from the portable sections and Cloud's supplied session and trace settings. Call `SkillReloader.validate` for a staged check, or the private, versioned, explicit-map `prepare` overload followed by `publish` for publication. Include the offending path in the message for an invalid administrative setting. |
 | Embedded Loomspan Framework | Validate the composed candidate, resolve application variables during preparation, and capture the settings with the generation. Enforce mission timeout, depth, the six session quotas, and attachment size during execution. The entry generation's trace persistence policy determines which completed traces are retained. Cloud owns their storage lifetime. A failed preparation leaves the serving generation in place. |
 
 Trace persistence is the owner-selectable administrative runtime setting in V1. New applications use `ONERROR`. Owners can select `NEVER`, `ONERROR`, or `ALWAYS`. Cloud defers [trace expiry and cleanup](roadmap.md#durable-execution-traces) beyond V1.
@@ -66,7 +68,7 @@ Size the Go response timeout and pod shutdown grace period independently. A call
 
 ### Application variables
 
-Staged validation checks the authored candidate without reading variable values. Apply the [publish request requirements](execution-engine-api.md#internal-api-requests) when resolving application variables. The explicit-map overload resolves names only from that map. Each generation captures its resolved strings as literal data. Keep supplied values out of logs. [Publication variable syntax](publication-package-format.md#application-variables)
+Staged validation checks the authored candidate without reading variable values. Apply the [publish request requirements](execution-engine-api.md#internal-api-requests) when resolving application variables. The explicit-map overload resolves names only from that map. Each generation captures its resolved strings as literal data. [Publication variable syntax](publication-package-format.md#application-variables)
 
 ### Tenant Vertex AI credentials
 
@@ -80,7 +82,9 @@ Exercise both JSON forms, a missing declaration with engine credentials availabl
 
 For an application restart, the wrapper prepares and publishes a fresh Framework generation even when the requested publication version is already installed. Console exposes the resulting generation ID for the [restart confirmation in Go](go-backend-roadmap.md#restarting-an-application).
 
-The wrapper adapts the ZIP to Framework skill documents and execution configuration, supplies the value map, private visibility, and the assigned version to `SkillReloader.prepare`, then publishes the prepared update. Framework keeps the current generation serving during preparation. After publication, fresh invocations use the replacement and already admitted invocations retain their captured generations, including for reachable child skills. A failed update leaves the current publication available. Publishing zero YAML skill documents removes previously published YAML skills and leaves the namespace installed.
+**Settled decision for invocation cutover.** Go routes to an eligible engine. Framework captures the active generation when it accepts an invocation and retains the captured generations for that invocation and its reachable child skills. An invocation already in transit at cutover uses the replacement if Framework first captures its generation after publication. This requires no additional cutover coordination in Go.
+
+The wrapper adapts the ZIP to Framework skill documents and execution configuration, supplies the value map, private visibility, and the assigned version to `SkillReloader.prepare`, then publishes the prepared update. The current generation keeps serving during preparation and after a failed update. Publishing zero YAML skill documents removes previously published YAML skills and leaves the namespace installed.
 
 ### Application diagnostics and retained traces
 
@@ -94,7 +98,9 @@ Framework upgrades, including engine and proxy rollout order and access to retai
 
 Implement the Cloud ZIP adapter, validate and publish endpoints, mTLS wiring, and Go integration in the Spring Boot host.
 
-Start an engine with zero Cloud applications installed. Have the Go Console proxy read its first `GET /_loomspan/observability/v1/instance` snapshot using mTLS and the environment’s Console API key. Immediately send a pack using Framework defaults through the engine’s publish endpoint with an empty value map and the application’s effective runtime settings. Assert that the first publish request succeeds. Before the first invocation, verify the success response triggers a proxy refresh and routing sees the requested namespace and version on the JVM identified by the first snapshot. Verify a failed replacement leaves the previous version serving. Restart the engine and confirm the saved publication on the new JVM.
+Start an engine with zero Cloud applications installed. Have the Go Console proxy read its first `GET /_loomspan/observability/v1/instance` snapshot using mTLS and the environment’s Console API key. Immediately send a pack using Framework defaults through the engine’s publish endpoint with an empty value map and the application’s effective runtime settings. Assert that the first publish request succeeds. Before the first invocation, verify the success response triggers a proxy refresh and routing sees the requested namespace and version on the JVM identified by the first snapshot. Verify a failed replacement leaves the previous version serving. Then publish a new version and terminate the pod after Go receives `204` but before Console observes the update. Verify Go restores that version on the replacement and sends it the first invocation only after Console confirms the namespace and version on the new JVM.
+
+That first invocation must execute a real skill from the restored publication on the replacement JVM. Verify that the caller receives the skill's expected result through Go.
 
 Test the [validate and publish responses](execution-engine-api.md#validate-and-publish-responses) with an invalid staged pack and a publication exception. In the invocation milestone, test the [execution-view modes](execution-engine-api.md#invocation-metadata) on success and skill error with tracing disabled.
 

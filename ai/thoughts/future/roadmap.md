@@ -40,6 +40,8 @@ All externally accessible operations should pass through a shared internal API b
 
 Within the platform, modules also communicate through internal APIs. Each module owns its functionality and defines how other modules can call it.
 
+V1 Cloud performs no content sanitization or redaction, including in logs, diagnostics, and API responses.
+
 ### Platform authentication and database
 
 V1 uses hosted Supabase Auth for sign-in and hosted Supabase Postgres as Loomspan Cloud’s internal database. Cloud uses the database for platform records such as application memberships and role assignments. Customer applications do not receive a database service as part of this decision.
@@ -129,7 +131,7 @@ We expect typical workloads to use little CPU or memory. Our goal is to run many
 
 ### Relationship to other components
 
-Cloud names each application's Framework namespace using `u{numericUserId}_{appSlug}`. The first underscore separates the numeric user ID from the application slug, which may itself contain underscores. For example, user `42` publishing `hello_world` gets namespace `u42_hello_world`. The complete namespace must fit Framework's 32-character limit. In the first release, Cloud treats an application rename as publishing a new application under the new slug.
+Cloud assigns each application a private namespace of the form `u{numericUserId}-{appSlug}`, such as `u42-order-support`. The complete namespace follows the [publication naming rules](publication-package-format.md#namespace-and-skill-names). In V1, renaming an application means publishing a new application under the new slug.
 
 ## Landing page and progressive discovery
 
@@ -175,7 +177,7 @@ The API will let users submit work and will likely also provide status and metri
 
 ### Synchronous invocation
 
-In the first release, clients invoke an application synchronously. Callers can opt in to the [Framework execution view](execution-engine-api.md#invocation-metadata) on each invocation, even when tracing is disabled.
+In the first release, clients invoke an application synchronously. Callers with diagnostics access can request an execution view even when tracing is disabled. [Invocation response visibility](go-backend-roadmap.md#invocation-response-visibility)
 
 If the API cannot return an execution result, it will distinguish two outcomes.
 
