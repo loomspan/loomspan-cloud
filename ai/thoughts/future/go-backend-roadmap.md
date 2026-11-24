@@ -28,9 +28,9 @@ The Cloud API computes SHA-256 over the exact ZIP bytes and compares the digest 
 
 A confirmed restaging creates a new current revision referencing the same stored ZIP. Validation results stay with their original revision. Previously unseen ZIP bytes create a new revision after upload checks pass. The Cloud API makes the comparison and staging update atomically so concurrent identical uploads resolve to one revision. A rejected upload creates no revision and preserves the current revision and its validation results. A pack staged by promotion follows the same rules.
 
-Through Console or MCP, an authorized caller can validate a specific staged revision. Go runs all independent checks it can complete, including engine validation of the authored pack even when application variables are missing or blank. It returns the engine diagnostics, all missing or blank variable references (with pack-relative source and authored YAML path), and any other pack issues found by Cloud in one result. The result belongs to the requested revision even if another upload arrives. The pack stays staged and the current publication keeps serving.
+Through Console or MCP, an authorized caller can validate a specific staged revision. Go runs its Cloud checks and requests engine validation of the authored pack even when application variables are missing or blank. Once validation completes, Go returns the engine diagnostics, all missing or blank variable references (with pack-relative source and authored YAML path), and any other pack issues found by Cloud in one result. A completed result can report an invalid pack. The result belongs to the requested revision even if another upload arrives. The pack stays staged and the current publication keeps serving.
 
-If engine validation is unavailable, interrupted, or blocked by an unreadable request, Go includes that outcome and every available finding in the same caller-facing result. The result identifies any checks that could not complete.
+If validation cannot complete, Go reports that the result is unavailable and tells the caller to retry validation. Go withholds partial findings from the caller.
 
 If the pack is otherwise valid, report that it passed validation and identify the variables blocking publication. Once the owner supplies them, they can publish the same revision directly. Publication checks the current values.
 
@@ -91,7 +91,7 @@ When an owner grants a user access to a published application, the Cloud API cou
 
 ## Invocation response visibility
 
-Go alone enforces the V1 request limits for REST and MCP invocations before dispatch to Java. The caller's invoke request body may contain up to 20 MiB (20,971,520 bytes) in total and up to 25 uploaded files. Both limits are inclusive. Count the entire JSON or multipart body, including metadata, file contents, part headers, and boundaries. Each uploaded file part counts once, including an empty file. The JSON metadata part counts only toward the byte limit. If either limit is exceeded, Go rejects the request before dispatch.
+REST, MCP, and the UI all go through the same Go invocation logic, which enforces the V1 request limits before dispatch to Java. The caller's invoke request body may contain up to 20 MiB (20,971,520 bytes) in total and up to 25 uploaded files. Both limits are inclusive. Count the entire JSON or multipart body, including metadata, file contents, part headers, and boundaries. Each uploaded file part counts once, including an empty file. The JSON metadata part counts only toward the byte limit. If either limit is exceeded, Go rejects the request before dispatch.
 
 The Cloud API applies the same V1 rule to REST and MCP. With permission to invoke the application, callers receive the exact `result` on success or the engine’s top-level `message` verbatim and any top-level input-validation `issues` on failure. Caller-friendly error categories and rewritten messages are deferred to V2. [Engine response fields](execution-engine-api.md#invoke-responses)
 

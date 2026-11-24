@@ -87,11 +87,11 @@ Java uses the skill's declared input shape to construct missing object or array 
 
 ## Validate and publish responses
 
-For staged validation, Java runs every independent wrapper and Framework check it can complete. It returns their findings together in the `200 OK` validation result with `valid`, `issues`, and `skills`. An authored Vertex credential-policy violation is a structured issue. Java continues checking unrelated skill references when they can be validated. Each issue carries `severity`, `sourceName`, and `message`, plus `skillName` and `fieldPath` when available. Each validated skill carries `namespace`, `localName`, and `kind`. Warnings alone leave `valid` true. Any `ERROR` yields `valid: false` and an empty `skills` array.
+For staged validation, Java runs the independent wrapper and Framework checks and returns a completed report as `200 OK` with `valid`, `issues`, and `skills`. An authored Vertex credential-policy violation is a structured issue. Java continues checking unrelated skill references when they can be validated. Each issue carries `severity`, `sourceName`, and `message`, plus `skillName` and `fieldPath` when available. Each validated skill carries `namespace`, `localName`, and `kind`. Warnings alone leave `valid` true. Any `ERROR` yields `valid: false` and an empty `skills` array.
 
 After Framework's `publish` method returns successfully, Java responds with `204 No Content`. [Go publication handling](go-backend-roadmap.md#publishing-a-reviewed-revision)
 
-If a validation check fails partway through, Java preserves every finding already collected and includes the failure message in the same result. If the wrapper rejects the ZIP or request metadata before validation can begin, Java returns a non-success HTTP status with the message as `text/plain`. Go includes that message verbatim alongside its own findings in the caller's validation result.
+If Java cannot complete validation or rejects the ZIP or request metadata before validation can begin, it returns a non-success HTTP status with the failure message as `text/plain`. Go handles this as an [incomplete validation attempt](go-backend-roadmap.md#staging-revisions-and-validation).
 
 For publish, a rejected ZIP or request metadata, or an exception during preparation or publication, yields a non-success HTTP status with the message as `text/plain`. Go passes the message to the authorized caller exactly as received. If the publish response is lost after dispatch, Go follows the [publish confirmation and retry rule](go-backend-roadmap.md#unconfirmed-publications).
 
