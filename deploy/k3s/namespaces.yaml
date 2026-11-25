@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loomspan-engine
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loomspan-management

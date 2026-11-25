@@ -1,0 +1,38 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: engine-server
+  namespace: loomspan-engine
+spec:
+  secretName: engine-server-tls
+  issuerRef:
+    name: loomspan-engine-transport
+    kind: ClusterIssuer
+    group: cert-manager.io
+  dnsNames:
+    - execution-engine.loomspan-engine.svc
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+  privateKey:
+    rotationPolicy: Always
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: management-client
+  namespace: loomspan-management
+spec:
+  secretName: management-client-tls
+  issuerRef:
+    name: loomspan-engine-transport
+    kind: ClusterIssuer
+    group: cert-manager.io
+  uris:
+    - spiffe://loomspan-cloud/management/backend
+  usages:
+    - digital signature
+    - client auth
+  privateKey:
+    rotationPolicy: Always
