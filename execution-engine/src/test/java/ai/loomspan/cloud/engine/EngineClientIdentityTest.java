@@ -80,14 +80,14 @@ class EngineClientIdentityTest {
     @BeforeAll
     void start(@TempDir Path testDirectory) throws Exception {
         temporary = testDirectory;
-        issuer = authority("fixture-ca");
-        var anotherIssuer = authority("untrusted-fixture-ca");
-        server = leaf(issuer, "server", "engine", "serverAuth", ENGINE_SANS);
-        authorized = leaf(issuer, "authorized", "management", "clientAuth", "SAN=uri:" + MANAGEMENT_ID);
-        wrongIdentity = leaf(issuer, "wrong-identity", "other-client", "clientAuth",
+        issuer = authority(temporary, "fixture-ca");
+        var anotherIssuer = authority(temporary, "untrusted-fixture-ca");
+        server = leaf(temporary, issuer, "server", "engine", "serverAuth", ENGINE_SANS);
+        authorized = leaf(temporary, issuer, "authorized", "management", "clientAuth", "SAN=uri:" + MANAGEMENT_ID);
+        wrongIdentity = leaf(temporary, issuer, "wrong-identity", "other-client", "clientAuth",
                 "SAN=uri:spiffe://loomspan-cloud/management/other");
-        commonNameOnly = leaf(issuer, "common-name-only", MANAGEMENT_ID, "clientAuth", null);
-        untrusted = leaf(anotherIssuer, "untrusted", "untrusted", "clientAuth", "SAN=uri:" + MANAGEMENT_ID);
+        commonNameOnly = leaf(temporary, issuer, "common-name-only", MANAGEMENT_ID, "clientAuth", null);
+        untrusted = leaf(temporary, anotherIssuer, "untrusted", "untrusted", "clientAuth", "SAN=uri:" + MANAGEMENT_ID);
         serverCertificate = Files.copy(server.pem(), temporary.resolve("mounted-tls.crt"));
         serverKey = temporary.resolve("mounted-tls.key");
         writeKey(serverKey, server.key());
@@ -167,7 +167,7 @@ class EngineClientIdentityTest {
         try (var good = client(authorized)) {
             instance = get(good, INSTANCE, KEY).headers().firstValue(INSTANCE_HEADER).orElseThrow();
         }
-        var replacement = leaf(issuer, "replacement-server", "engine", "serverAuth", ENGINE_SANS);
+        var replacement = leaf(temporary, issuer, "replacement-server", "engine", "serverAuth", ENGINE_SANS);
         Path replacementKey = temporary.resolve("replacement.key");
         writeKey(replacementKey, replacement.key());
         Files.move(replacementKey, serverKey, StandardCopyOption.REPLACE_EXISTING);
@@ -223,6 +223,32 @@ class EngineClientIdentityTest {
     }
 
     private HttpClient client(Leaf leaf) throws Exception {
+        return client(issuer, leaf);
+    }
+
+    static AuthorizedFixture authorizedFixture(Path temporary) throws Exception {
+        var issuer = authority(temporary, "fixture-ca");
+        var server = leaf(temporary, issuer, "server", "engine", "serverAuth", ENGINE_SANS);
+        var management = leaf(temporary, issuer, "authorized", "management", "clientAuth", "SAN=uri:" + MANAGEMENT_ID);
+        var serverKey = temporary.resolve("mounted-tls.key");
+        writeKey(serverKey, server.key());
+        return new AuthorizedFixture(issuer, management, server.pem(), serverKey);
+    }
+
+    record AuthorizedFixture(Authority issuer, Leaf management, Path serverPem, Path serverKey) {
+        HttpClient openClient() throws Exception {
+            return client(issuer, management);
+        }
+
+        String[] launchArguments() {
+            return new String[]{"--server.port=0", "--server.address=127.0.0.1", "--server.shutdown=immediate",
+                    "--spring.main.banner-mode=off", "--LOOMSPAN_ENGINE_CERTIFICATE=" + serverPem.toUri(),
+                    "--LOOMSPAN_ENGINE_PRIVATE_KEY=" + serverKey.toUri(),
+                    "--LOOMSPAN_ENGINE_TRUST_CERTIFICATE=" + issuer.pem().toUri(), "--LOOMSPAN_CONSOLE_API_KEY=" + KEY};
+        }
+    }
+
+    private static HttpClient client(Authority issuer, Leaf leaf) throws Exception {
         var trustStore = KeyStore.getInstance("PKCS12");
         trustStore.load(null, PASSWORD);
         trustStore.setCertificateEntry("issuer", issuer.certificate());
@@ -243,7 +269,7 @@ class EngineClientIdentityTest {
                 .sslContext(ssl).connectTimeout(Duration.ofSeconds(5)).build();
     }
 
-    private Authority authority(String name) throws Exception {
+    private static Authority authority(Path temporary, String name) throws Exception {
         Path store = temporary.resolve(name + ".p12");
         Path pem = temporary.resolve(name + ".pem");
         keytool("-genkeypair", "-keystore", store.toString(), "-alias", name,
@@ -253,7 +279,7 @@ class EngineClientIdentityTest {
         return new Authority(name, store, pem, certificate(pem));
     }
 
-    private Leaf leaf(Authority authority, String alias, String commonName, String usage, String extensions)
+    private static Leaf leaf(Path temporary, Authority authority, String alias, String commonName, String usage, String extensions)
             throws Exception {
         Path store = temporary.resolve(alias + ".p12");
         Path csr = temporary.resolve(alias + ".csr");

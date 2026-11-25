@@ -18,7 +18,7 @@ done
 
 ## Build and deploy
 
-Apply `management-backend/migrations/001_publications.sql` to the intended Supabase PostgreSQL database using its migration or SQL tooling. Give the backend database role access to the private `loomspan_cloud` schema and tables. Supply the role's connection URL from the environment's secret store via `loomspan-publication-db` key `database-url` in `loomspan-management`. The backend supports direct PostgreSQL and transaction-pooled connections. Configure the URL to verify the server certificate against the appropriate trust roots.
+Apply `management-backend/migrations/001_publications.sql` and then `002_invocation.sql` to the intended Supabase PostgreSQL database using its migration or SQL tooling. Give the backend database role access to the private `loomspan_cloud` schema and tables. Supply the role's connection URL from the environment's secret store via `loomspan-publication-db` key `database-url` in `loomspan-management`. The backend supports direct PostgreSQL and transaction-pooled connections. Configure the URL to verify the server certificate against the appropriate trust roots.
 
 Provide a bound `loomspan-publication-packs` PersistentVolumeClaim in `loomspan-management`. The backend mounts it read-only. Each staged pack lives at `<lowercase SHA-256 digest>.zip` and its immutable original digest is recorded in `loomspan_cloud.stage_revisions`. The database must retain publication and attempt history, and the mounted storage must retain each referenced ZIP across deployments. The backend starts one reconciliation worker for its single replica. At startup and on a fresh authenticated engine association it restores the database's acknowledged placements.
 
@@ -39,6 +39,21 @@ kubectl --context "$KUBE_CONTEXT" -n loomspan-management wait certificate/manage
 ```
 
 Go logs the watch-selected Pod UID and authenticated JVM ID, including whether a snapshot and the Console activity stream are connected. The first authenticated snapshot is available without any Cloud application or rollout probe. Routing additionally requires a ready, non-terminating pod and a matching namespace publication.
+
+## Shared invocation
+
+`internal/invocation.NewService` composes the application grant reader,
+publication placement resolver, engine transport, and the environment's stable
+Cloud issuer. A transport adapter passes the authenticated actor, application
+ID, and exact skill name separately to `InvokeJSON`. The body contains the
+`input` object. An authorized calling backend adds an `endUser` object
+with its end-user ID in `id` and their application role names in `roles`.
+
+The application-scoped grant tables hold assigned roles for direct users and
+the allowed identities for calling backends. The administrator-controlled
+`show_execution_details` column defaults to false. Go reads it with the grant
+on every call. The [disposable milestone](milestone/README.md) verifies the
+shared invocation path after recovering an acknowledged publication.
 
 ## Disposable observation check
 

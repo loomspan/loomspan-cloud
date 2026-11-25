@@ -1,0 +1,46 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: loomspan-restored-skill
+  namespace: loomspan-management
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 360
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loomspan-management-backend
+    spec:
+      serviceAccountName: loomspan-management-backend
+      restartPolicy: Never
+      containers:
+        - name: milestone-probe
+          image: loomspan-milestone-probe:local
+          imagePullPolicy: Never
+          args: ["-test.v", "-test.run", "^TestK3sRestoredSkill$", "-test.timeout", "5m"]
+          env:
+            - name: LOOMSPAN_RUN_K3S_MILESTONE
+              value: "1"
+            - name: LOOMSPAN_CONSOLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: loomspan-console
+                  key: api-key
+            - name: LOOMSPAN_MILESTONE_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: loomspan-milestone-db
+                  key: password
+          volumeMounts:
+            - name: engine-transport
+              mountPath: /var/run/loomspan/engine-transport
+              readOnly: true
+            - name: packs
+              mountPath: /probe/packs
+      volumes:
+        - name: engine-transport
+          secret:
+            secretName: management-client-tls
+        - name: packs
+          persistentVolumeClaim:
+            claimName: loomspan-milestone-packs
