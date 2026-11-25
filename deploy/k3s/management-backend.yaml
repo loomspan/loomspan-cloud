@@ -26,11 +26,25 @@ spec:
                 secretKeyRef:
                   name: loomspan-console
                   key: api-key
+            - name: LOOMSPAN_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: loomspan-publication-db
+                  key: database-url
+            - name: LOOMSPAN_PACK_ROOT
+              value: /var/lib/loomspan/publications
           volumeMounts:
             - name: engine-transport
               mountPath: /var/run/loomspan/engine-transport
+              readOnly: true
+            - name: publications
+              mountPath: /var/lib/loomspan/publications
               readOnly: true
       volumes:
         - name: engine-transport
           secret:
             secretName: management-client-tls
+        - name: publications
+          persistentVolumeClaim:
+            claimName: loomspan-publication-packs
+            readOnly: true

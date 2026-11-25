@@ -15,5 +15,6 @@ ENTRYPOINT ["/app/k3s-engine-test"]
 
 FROM scratch AS backend
 COPY --from=build /out/management-backend /app/management-backend
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 USER 10001:10001
 ENTRYPOINT ["/app/management-backend"]

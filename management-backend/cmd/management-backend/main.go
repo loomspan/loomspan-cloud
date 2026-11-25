@@ -7,8 +7,10 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/loomspan/loomspan-cloud/management-backend/internal/engine"
+	"github.com/loomspan/loomspan-cloud/management-backend/internal/publication"
 )
 
 func main() {
@@ -36,6 +38,20 @@ func run(ctx context.Context) error {
 	observer := engine.NewObserver(console, func(err error) {
 		slog.Warn("engine Console connection interrupted", "error", err)
 	})
+	startup, cancelStartup := context.WithTimeout(ctx, 10*time.Second)
+	store, err := publication.OpenPostgres(startup, os.Getenv("LOOMSPAN_DATABASE_URL"))
+	cancelStartup()
+	if err != nil {
+		return err
+	}
+	defer store.Close()
+	packs, err := publication.OpenMountedPacks(os.Getenv("LOOMSPAN_PACK_ROOT"))
+	if err != nil {
+		return err
+	}
+	defer packs.Close()
+	client := publication.NewEngineClient(observer, transport)
+	publications := publication.NewService(store, packs, observer, client, nil)
 	pods := make(chan *engine.Pod)
 	var workers sync.WaitGroup
 	workers.Go(func() {
@@ -44,6 +60,7 @@ func run(ctx context.Context) error {
 		})
 	})
 	workers.Go(func() { observer.Run(ctx, pods) })
+	workers.Go(func() { publications.Run(ctx) })
 	logObservations(ctx, observer)
 	workers.Wait()
 	return nil

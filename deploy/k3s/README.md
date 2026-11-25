@@ -18,6 +18,10 @@ done
 
 ## Build and deploy
 
+Apply `management-backend/migrations/001_publications.sql` to the intended Supabase PostgreSQL database using its migration or SQL tooling. Give the backend database role access to the private `loomspan_cloud` schema and tables. Supply the role's connection URL from the environment's secret store via `loomspan-publication-db` key `database-url` in `loomspan-management`. The backend supports direct PostgreSQL and transaction-pooled connections. Configure the URL to verify the server certificate against the appropriate trust roots.
+
+Provide a bound `loomspan-publication-packs` PersistentVolumeClaim in `loomspan-management`. The backend mounts it read-only. Each staged pack lives at `<lowercase SHA-256 digest>.zip` and its immutable original digest is recorded in `loomspan_cloud.stage_revisions`. The database must retain publication and attempt history, and the mounted storage must retain each referenced ZIP across deployments. The backend starts one reconciliation worker for its single replica. At startup and on a fresh authenticated engine association it restores the database's acknowledged placements.
+
 Use JDK 21 and Maven 3.9 or later. The Framework starter snapshot must include the per-namespace trace persistence field from Framework commit `2ca9caf4` or later. Build from the repository root:
 
 ```sh

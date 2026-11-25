@@ -1,0 +1,7 @@
+name: read-record
+description: Read a record from the configured service
+executor: http
+config:
+  target: records
+  method: GET
+  path: { $var: records.lookup-path }
