@@ -4,7 +4,7 @@ A user can take an application from setup through its first run and explain the 
 
 ## Manage an application and its users
 
-A user signs in by email magic link and can create an application. The application maps to a Framework namespace. Its owner defines application roles and can assign them to an email address before the user first signs in. Once the user verifies that address through the magic link, they gain the assigned access to that application.
+A user signs in by email magic link and can create an application. The application maps to a Framework namespace. Its sole owner can grant Manager or Caller access and assign separate skill roles by email before a user first signs in. Once the user verifies that address through the magic link, they gain the assigned access to that application. [Go application permissions](go-backend-roadmap.md#application-permissions)
 
 Users can authorize an MCP companion in their browser. The companion receives its own tokens and can reconnect across sessions with the user’s current permissions. Token lifetimes remain open.
 
@@ -20,7 +20,7 @@ The owner and companion can prepare skills and runtime configuration, see how th
 
 The first V1 authoring milestone is upload and download of the portable skill pack as one [publication ZIP](publication-package-format.md). The owner or companion can download a staged or published pack. [Go upload checks](go-backend-roadmap.md#zip-checks-before-staging)
 
-The owner can review one staging revision while a developer uploads another. Publishing the reviewed revision requires confirmation when a newer revision is staged. The newer work stays available. [Staging and publication workflow](go-backend-roadmap.md#upload-and-staged-validation)
+The owner can review one staging revision while a Manager uploads another. Either can publish. Publishing the reviewed revision requires confirmation when a newer revision is staged. The newer work stays available. [Staging and publication workflow](go-backend-roadmap.md#upload-and-staged-validation)
 
 An owner can promote a tested QA publication to production through Console or MCP, review the staged pack, and download the original QA publication. [Promotion workflow](go-backend-roadmap.md#publication-promotion)
 
@@ -32,7 +32,7 @@ Users can invoke a published skill through REST or through their companion over 
 
 ## Inspect the application and its runs
 
-Through the cloud Console UI or through MCP, the user or companion can inspect published skills and their version. Cloud run history covers invocations with a retained trace. Only application administrators and companions acting with their permissions can inspect live sessions and events, browse retained runs, or review and download their traces, including after engine replacement. Cloud will revisit [retention and cleanup](roadmap.md#durable-execution-traces) after observing V1 usage. Longer-term error summaries, timing statistics, and dashboards are possible additions.
+Through the cloud Console UI or through MCP, the user or companion can inspect published skills and their version. Cloud run history covers invocations with a retained trace. Only application administrators and companions acting with their permissions can inspect live sessions and events, browse retained runs, or review and download their traces, including after engine replacement. Cloud applies the [V1 storage quota and cleanup policy for retained engine traces](go-backend-roadmap.md#trace-cleanup-job). Longer-term error summaries, timing statistics, and dashboards are possible additions.
 
 ## Proposed V1 demonstration
 

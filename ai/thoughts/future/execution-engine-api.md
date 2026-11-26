@@ -98,7 +98,7 @@ For publish, a rejected ZIP or request metadata, or an exception during preparat
 ## Invocation identity and roles
 
 - **Direct user call.** The user authenticates to Cloud. Go sends the authenticated user's identity and the roles Cloud has assigned that user for the target application.
-- **Calling application.** The backend authenticates to Cloud and supplies its own stable ID for the end user along with that user's roles on each invocation. Go accepts the assertion only from a backend the owner has authorized for the target application. Go identifies the end user by the authenticated backend and the supplied user ID together.
+- **Calling application.** The backend authenticates to Go with its application API key. The owner trusts that backend to decide which of the target application's skill roles each of its users holds. On each invocation it supplies the user's stable ID and skill roles. Go derives the issuer from the authenticated backend's stable identity, which persists across key replacement. [Application API keys](go-backend-roadmap.md#application-api-keys)
 
 Go sends a required `caller` object alongside the skill input on every internal invocation request. For a direct call, `issuer` identifies Cloud and `subject` identifies the signed-in user. For a calling application, Go sets `issuer` from the authenticated backend and `subject` from the end-user ID that backend supplies. Java uses the pair as the Spring Security principal. If `caller` is absent or either identity field is missing or blank, Java rejects the request before invoking the skill.
 

@@ -44,7 +44,7 @@ V1 Cloud performs no content sanitization or redaction, including in logs, diagn
 
 ### Platform authentication and database
 
-V1 uses hosted Supabase Auth for sign-in and hosted Supabase Postgres as Loomspan Cloud’s internal database. Cloud uses the database for platform records such as application memberships and role assignments. Customer applications do not receive a database service as part of this decision.
+V1 uses Supabase Auth for sign-in and Postgres for Loomspan Cloud’s internal records, including application memberships and role assignments. The operator supplies the Auth and database endpoints at installation. Operators can use hosted Supabase or run Supabase Auth and Postgres inside their own network. For an internal installation, the operator provisions and maintains both services and configures email delivery for magic-link sign-in.
 
 Development, QA, and production will use K3s so the Go backend and Java engines use the same deployment model in every environment. Oracle Cloud Always Free compute remains a hosting option.
 
@@ -58,7 +58,7 @@ The execution engine uses Java to embed Loomspan Framework. For the cloud interf
 | MCP server | Go with the official MCP Go SDK | Console already uses this SDK. Cloud MCP tools can call the same authorized operations as REST and the web UI. |
 | Console proxy and aggregator | Go | Console already interprets traces in Go. Cloud can use the same approach to find and explain an application's runs across engines, subject to the user's permissions. |
 
-Our starting preference is one Go backend deployment with separate packages for REST, MCP, and diagnostics. The Java execution engine can be deployed independently. Console's existing Go packages are internal. Following one operation, such as retrieving a trace for an authorized application, should help us decide which code is worth extracting into a shared package.
+The Java execution engine can be deployed independently. Loomspan Cloud will own the shared Console. Its two deployment profiles use the same diagnostic behavior across REST, MCP, and the browser. [Console deployment profiles](#console-deployment-profiles)
 
 Security is a primary selection criterion. We want to choose technologies we can secure and design the modules so a security audit can give us reasonable confidence in the security of the cloud as a whole.
 
@@ -70,14 +70,14 @@ We prefer one authentication strategy across the web UI, REST, and MCP wherever 
 
 ### Application owners, users, and roles
 
-Each cloud application has an owner who manages access to it. Cloud will support two ways to invoke the application on behalf of an end user.
+Cloud applies the per-application [ownership and role rules](go-backend-roadmap.md#application-permissions) to two forms of invocation.
 
-- **Direct authentication.** The owner defines application roles and can assign them to an email address before the user first signs in. The user gains those roles when they verify that address through the V1 magic link. Verified email identifies the user for membership purposes across supported sign-in methods. Cloud stores memberships and roles per application in Supabase and checks them when the user invokes the application.
-- **Authentication by a calling application.** An application that uses Loomspan Cloud as its AI execution engine can authenticate its own end users and determine their roles. Its backend authenticates to Cloud and supplies its own stable ID for the end user along with that user's roles on each invocation. Cloud accepts the ID and roles only from a backend the owner has authorized to assert them for the target application. The user ID is scoped to that backend.
+- **Direct authentication.** The owner can assign a Cloud role and separately grant owner-defined skill roles to an email address before the user first signs in. The user gains those permissions when they verify that address through the V1 magic link. Verified email identifies the user for membership purposes across supported sign-in methods. Cloud stores memberships and roles per application in Supabase and checks them when the user invokes the application.
+- **Calling application.** A third-party backend authenticates to Cloud and asserts its end user's identity and skill roles under the [application API key contract](go-backend-roadmap.md#application-api-keys).
 
 ### Relationship to other components
 
-MCP companions obtain their own tokens after the user approves the connection in a browser. Whether REST clients also need API keys remains open. Regardless of how a caller authenticates, the shared internal API should apply the same permission rules.
+MCP companions obtain their own tokens after [browser approval](go-backend-roadmap.md#companion-approval-and-inactivity). Personal API keys and unattended scripts that manage applications on a user's behalf are outside V1.
 
 In both models, the shared Cloud API checks permission to invoke the target application before routing to its namespace. The Java engine wrapper establishes the end user's identity and application roles in the Framework security context. Framework then enforces each skill's role requirements at entry and when calling child skills. Cloud separately enforces management permissions such as publishing the application or managing its users.
 
@@ -105,17 +105,19 @@ On K3s, cert-manager will provision and rotate the mTLS certificates for communi
 
 ### Open questions for a Kubernetes deployment
 
-- **Pod management.** A Kubernetes Deployment is a candidate for maintaining engine pods. Go can publish as soon as the Console proxy reads the first authenticated instance snapshot from the intended engine JVM. Go can route invocations once the proxy confirms the requested namespace and publication version on an eligible engine. Whether K3s needs a readiness probe for rollouts remains open. [Java startup contract](java-execution-engine-roadmap.md#startup-and-readiness)
-- **Cluster recovery.** How will a replacement cluster regain its credentials and mount the durable filesystems so the controller can restore applications?
+- **Pod management.** A Kubernetes Deployment is a candidate for maintaining engine pods. Whether K3s needs a readiness probe for rollouts remains open. [Java startup contract](java-execution-engine-roadmap.md#startup-and-readiness)
+- **Cluster recovery.** How will a replacement cluster recover its credentials and [environment encryption key](go-backend-roadmap.md#encryption-at-rest) and remount the durable filesystems?
 - **Application credentials.** What role, if any, would Kubernetes Secrets have in managing application credentials?
 
 ### Durable execution traces
 
-Application administrators and companions acting with their permissions can look up, review, and download saved traces, including after engine or cluster replacement.
+Full Cloud uses one shared `ReadWriteMany` volume with separate directories for engine-written traces, manually uploaded traces, staged or published skill packs, and [namespace skill catalogs](go-backend-roadmap.md#namespace-skill-catalog). The storage provider encrypts the entire volume when encryption is enabled. A fresh V1 installation provisions an encrypted Longhorn volume by default. An operator can supply a compatible shared volume with or without encryption. The engine writes to the [engine trace directory](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces). Go mounts that directory read-only and has write access to the uploads, packs, and catalog directories. The provider must support concurrent access across K3s nodes and same-directory atomic rename.
 
-Each engine pod mounts a shared persistent filesystem with the [entry-namespace trace layout](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces). Verify that completed durable writes survive pod loss and that a replacement cluster can access them. The trace volume must support simultaneous writes from engine pods on different K3s nodes and reads from the Go proxy. Storage provider selection and whether traces and publications share a service remain open.
+For example, an operator with an internal NFS server can export a directory for traces, bind a Kubernetes persistent volume for that export to a `ReadWriteMany` claim, and supply the claim at installation. The operator chooses whether the storage backing the NFS export is encrypted at rest.
 
-V1 proceeds with trace expiry and filesystem cleanup deferred, including cleanup of abandoned writes. Measure trace count, bytes per application, and growth over time under real Cloud workloads. Use those observations to decide the retention window, count or storage limits, cleanup ownership, and whether allowances should vary by pricing tier.
+To migrate the shared volume, pause writers, copy or restore all directories, and switch the engine and Go mounts. Verify a stored pack, a manual upload, historical trace lookup, and a newly completed trace before retiring the old volume. Verify that a replacement cluster can recover the files using an off-cluster backup and any required volume key.
+
+The [Full Cloud trace cleanup job](go-backend-roadmap.md#trace-cleanup-job) manages manual-upload expiry and retained-engine-trace storage on this volume.
 
 The [Go diagnostics roadmap](go-backend-roadmap.md#look-up-retained-traces) defines run history and authorized lookup.
 
@@ -161,7 +163,36 @@ The UI will give users a view of their running applications. The status informat
 
 ## Loomspan Console in the cloud
 
-Application administrators can use Loomspan Console to inspect live system events and retained traces for their applications. Companions use the same administrator permissions. The Console proxy enforces this boundary. It must hold when several tenants share an execution engine.
+### Console deployment profiles
+
+V1 has one Console with shared diagnostic operations, browser views, and MCP tools. The deployment profile determines how Console obtains authorized access to a target.
+
+- **Full Cloud.** Public and internal deployments use the same Cloud profile. The application picker lists only applications the user owns or manages. A user whose only role for an application is Caller cannot open any Cloud UI or Console screen for that application, including by direct link. Diagnostic access follows the [application permissions](go-backend-roadmap.md#application-permissions) for the selected namespace, even when several applications share an engine.
+- **Console-only.** A developer runs the Console executable to inspect a Framework application directly. In V1 the browser UI, REST API, and MCP endpoint listen only on loopback. The browser uses local pairing and MCP uses its own local credential. Console can connect outbound to a remote Framework target using authenticated HTTPS with certificate verification. The operator can inspect every namespace that the connected target exposes to those credentials, including `default` when present. This diagnostic access is independent of Cloud application ownership.
+
+Each browser tab keeps its own selection. Every scoped MCP or REST call explicitly names the application ID in Full Cloud or the namespace on the connected target in Console-only. In Full Cloud, Go resolves the application ID to its namespace and checks the caller's permission for the requested operation. Calls from a companion and selections in other tabs leave the current tab's selection intact.
+
+### Opening a trace file
+
+In both profiles, Console reads the trace's recorded entry namespace and proposes the matching namespace if it exists among the caller's permitted import destinations. Otherwise it proposes the current namespace. The caller can choose any permitted destination. Before saving, show both the recorded namespace and the destination namespace and ask the caller to confirm. Preserve the original trace and its metadata. Store the confirmed destination separately to determine where the upload is visible.
+
+If the destination already has a manual upload with the same trace ID, ask “Overwrite the existing uploaded trace?” Choosing **Overwrite** replaces that upload with the incoming file. Choosing **Cancel** keeps the existing upload and its expiry. The choice applies only to the manual upload in that destination.
+
+At confirmation, show **Retain for** with the choices **1 week**, **1 month**, **1 year**, and **Keep until deleted**. A new upload defaults to **1 week**. An overwrite keeps the existing expiry date or **Keep until deleted** unless the caller explicitly chooses a new retention period. Show the expiry date for a timed choice. Record the upload time at confirmation and calculate any newly selected period from that time. Users with permission to manage the upload can change its expiry after upload or delete it early.
+
+Full Cloud binds each upload to its destination application and checks [upload permissions](go-backend-roadmap.md#uploaded-trace-permissions). Console-only binds it to the connected target and destination namespace. Switching scope shows that scope's uploads. Uploads survive Console restarts and Cloud pod replacement and appear separately from engine-recorded run history. Expiry or manual deletion removes only that saved import, even if its trace ID matches a retained run.
+
+### Console navigation and modules
+
+When Console moves from Loomspan Framework to Loomspan Cloud, design its navigation around complete user workflows. Both profiles use the same diagnostic views and navigation labels. Group Cloud management workflows, such as publications and membership, under a distinct top-level management section.
+
+Each profile selects its modules in one place. Each module contributes its menu entries and routes together, so Console-only can omit the entire management section and its pages. Shared diagnostic screens should work in either profile without scattered profile checks. Within an enabled module, show actions appropriate to the user's permissions and enforce those permissions in the API.
+
+Review the same trace in both profiles as a design check: the path through diagnostics should be recognizable in both, and Console-only should have no empty management menus, disabled placeholders, or links into omitted pages.
+
+### Cloud diagnostics
+
+The [Console proxy](go-backend-roadmap.md#console-proxy) owns application-scoped access to live events and retained runs.
 
 ### Relationship to other components
 
@@ -177,7 +208,7 @@ The API will let users submit work and will likely also provide status and metri
 
 ### Synchronous invocation
 
-In the first release, clients invoke an application synchronously. An application administrator controls whether invokers automatically receive the available execution view for their own call on success or failure. The same switch controls whether invokers receive the available `debug` and `diagnosis` fields on failure. It defaults to off for new applications and works independently of trace persistence. [Invocation response visibility](go-backend-roadmap.md#invocation-response-visibility)
+V1 invocations are synchronous. The [Go response visibility rules](go-backend-roadmap.md#invocation-response-visibility) define which execution details the caller receives.
 
 If the API cannot return an execution result, it will distinguish two outcomes.
 
