@@ -14,7 +14,7 @@ This structure supports our goal of building Loomspan Cloud as a modular system.
 
 Users and their AI companions create applications, submit work, and inspect results. Cloud manages where each application runs. Its main components are the Java execution engine, Go backend, and administration UI.
 
-The [architecture diagram](loomspan-cloud-architecture.png) shows the V1 component boundaries. Start component scoping at the [first single-engine milestone](java-execution-engine-roadmap.md#first-single-engine-milestone). The [Go roadmap](go-backend-roadmap.md) owns backend workflows, the [package specification](publication-package-format.md) defines valid archives, and the [V1 brief](v1-prototype-brief.md) describes the end-user demonstration.
+The [architecture diagram](loomspan-cloud-architecture.png) shows the V1 component boundaries. The [Go roadmap](go-backend-roadmap.md) owns backend workflows, the [package specification](publication-package-format.md) defines valid archives, and the [V1 brief](v1-prototype-brief.md) describes the end-user demonstration.
 
 ### Guiding principle: an AI-first cloud
 
@@ -34,7 +34,7 @@ Loomspan Framework is the common core. An application can embed it directly, Loo
 
 ### Internal APIs and external interfaces
 
-We expect three external interfaces: a web UI for people working directly, REST for programmatic access, and MCP for AI companions. Each may expose a different set of features.
+Full Cloud exposes the web UI, REST for programmatic access, and MCP for AI companions. Across all three, the caller's credentials and application permissions determine which operations they can perform. For example, an owner can delete an application through REST, the UI, or MCP with their companion.
 
 All externally accessible operations should pass through a shared internal API before reaching the underlying platform. This is where Loomspan Cloud should enforce permissions and the rules for administration and debugging. For example, a request to read an application’s traces should go through the same access check whether it comes from the web UI, REST, or MCP.
 
@@ -44,7 +44,7 @@ V1 Cloud performs no content sanitization or redaction, including in logs, diagn
 
 ### Platform authentication and database
 
-V1 uses Supabase Auth for sign-in and Postgres for Loomspan Cloud’s internal records, including application memberships and role assignments. The operator supplies the Auth and database endpoints at installation. Operators can use hosted Supabase or run Supabase Auth and Postgres inside their own network. For an internal installation, the operator provisions and maintains both services and configures email delivery for magic-link sign-in.
+V1 uses Supabase Auth for sign-in and Postgres for Loomspan Cloud’s internal records, including application memberships and role assignments. The operator supplies the Auth and database endpoints at installation. Operators can use hosted Supabase or run Supabase Auth and Postgres inside their own network. For an internal installation, the operator provisions and maintains both services and configures delivery of one-time email sign-in codes.
 
 Development, QA, and production will use K3s so the Go backend and Java engines use the same deployment model in every environment. Oracle Cloud Always Free compute remains a hosting option.
 
@@ -64,7 +64,12 @@ Security is a primary selection criterion. We want to choose technologies we can
 
 ## Authentication
 
-In V1, users sign in by email magic link and can authorize an AI companion to act on their behalf. The companion can do everything the user can do. The shared Cloud API enforces the user’s current permissions for each operation.
+A person working with their AI companion uses one Cloud identity through the web UI, REST, and MCP. The same application memberships and permissions apply across all three. Connecting through MCP requires no separate Loomspan account, role assignment, or manual client registration by the user or operator. The web UI and MCP use the same browser sign-in flow. A user visiting the web UI signs in with a six-digit code sent to their email address. Connecting a companion works as follows.
+
+1. The companion starts an authorization request for the installation's MCP endpoint and opens the browser. The page names the requesting companion and explains that it will act with the user's current permissions.
+2. If the user is signed out, they enter their email, receive a six-digit code, and enter it in the same tab. Selecting **Sign in and connect** verifies the email and connects the named client in one submission. If the browser already has a valid Cloud session, the page shows the signed-in email and offers **Connect [companion name]**. One click connects using that session.
+3. Once connected, the browser redirects to the companion's callback with an OAuth authorization code. The companion exchanges that code with the installation's Supabase issuer for its own access token. The user enters the email code only in the browser and does not copy credentials into the companion.
+4. The companion automatically calls the [application-listing operation](go-backend-roadmap.md#application-permissions). Go verifies the token and uses the verified email to look up current memberships. Each entry identifies the application, namespace, and user's Cloud role. Subsequent operations use the companion's token and check current application permissions even if membership has changed since discovery.
 
 We prefer one authentication strategy across the web UI, REST, and MCP wherever practical. If an interface needs a different method to be usable, we want to support as few methods as possible and keep each one simple. The goal is an authentication system we can understand and secure.
 
@@ -72,20 +77,31 @@ We prefer one authentication strategy across the web UI, REST, and MCP wherever 
 
 Cloud applies the per-application [ownership and role rules](go-backend-roadmap.md#application-permissions) to two forms of invocation.
 
-- **Direct authentication.** The owner can assign a Cloud role and separately grant owner-defined skill roles to an email address before the user first signs in. The user gains those permissions when they verify that address through the V1 magic link. Verified email identifies the user for membership purposes across supported sign-in methods. Cloud stores memberships and roles per application in Supabase and checks them when the user invokes the application.
+- **Direct authentication.** The owner can assign a Cloud role and separately grant owner-defined skill roles to an email address before the user first signs in. Invitation notifications are outside V1 scope. The user gains those permissions when they verify that address with the one-time email code. Verified email identifies the user for membership purposes across supported sign-in methods. Cloud stores memberships and roles per application in Supabase and checks them when the user invokes the application.
 - **Calling application.** A third-party backend authenticates to Cloud and asserts its end user's identity and skill roles under the [application API key contract](go-backend-roadmap.md#application-api-keys).
 
 ### Relationship to other components
 
-MCP companions obtain their own tokens after [browser approval](go-backend-roadmap.md#companion-approval-and-inactivity). Personal API keys and unattended scripts that manage applications on a user's behalf are outside V1.
+Each Full Cloud installation trusts one dedicated Supabase Auth issuer, which signs user access tokens with an asymmetric key. Go retrieves public verification keys from the trusted issuer configured for the installation and verifies the signature, issuer, intended audience, and expiry locally. A replacement Go backend retrieves those public keys using the restored configuration.
 
-In both models, the shared Cloud API checks permission to invoke the target application before routing to its namespace. The Java engine wrapper establishes the end user's identity and application roles in the Framework security context. Framework then enforces each skill's role requirements at entry and when calling child skills. Cloud separately enforces management permissions such as publishing the application or managing its users.
+Full Cloud MCP companions obtain their own Supabase access tokens through [the shared sign-in flow](go-backend-roadmap.md#companion-sign-in). Browser, REST, and MCP share token verification. For MCP, the installer derives the expected audience from the installation's public URL using the canonical public MCP endpoint URL. Go requires the verified token's audience to match that URL or include it in the audience array. For each companion operation, Go checks the user's current permission for the requested action. Personal API keys and unattended scripts that manage applications on a user's behalf are outside V1.
+
+The issuer and audience design above is settled for V1. Backend tickets can use this contract directly without a separate design decision on the literal Supabase audience for browser or REST requests.
+
+In both models, the shared Cloud API checks permission to invoke the target application before routing to its namespace. Go uses Cloud ownership and membership to authorize Cloud operations. The Java engine wrapper receives the end user's identity and only the skill roles for the target application. Framework then enforces each skill's role requirements at entry and when calling child skills. Cloud separately enforces management permissions such as publishing the application or managing its users.
 
 Internal engine requests require authenticated Go client identity, including requests originating inside the engine pod. The [engine integration contracts](execution-engine-api.md#integration-contracts) define transport authentication and invocation metadata.
 
+### Authentication acceptance criteria
+
+- Starting with a supported companion and the installation's MCP URL, exercise the browser handoff above both signed out and with a valid Cloud session. Verify the named companion connects in one action in each case and only the signed-out user needs the emailed code. Complete both flows through callback, token exchange, and automatic application discovery using the companion's own token, with no separate account, manual client registration, or companion-specific role assignment.
+- Use an account that owns one application and is a Caller in another. Verify discovery lists both namespaces with the correct Cloud role and omits inaccessible applications, without asking the user to configure namespaces or roles.
+- Verify the access token issued by the configured sign-in flow contains the derived MCP audience and permits an authorized MCP operation. Go rejects an otherwise valid token from the trusted issuer before dispatch when that audience is missing or wrong. Go also rejects a token from another installation's issuer.
+- Verify a Manager can perform a Manager operation for the target application. On skill invocation, verify the engine receives only the user's assigned skill roles for that application, including an empty roles array when the user has none.
+
 ## Execution engine
 
-The [Java execution engine roadmap](java-execution-engine-roadmap.md) owns the design of the disposable Spring Boot engine and its first single-engine milestone. The Go placement controller sends publications, the Console proxy observes installed versions, and the router sends authorized invocations. See the [engine integration contracts](execution-engine-api.md#integration-contracts) for the responsibilities on each side of these exchanges.
+The [Java execution engine roadmap](java-execution-engine-roadmap.md) owns the design of the disposable Spring Boot engine. The Go placement controller sends publications, the Console proxy observes installed versions, and the router sends authorized invocations. See the [engine integration contracts](execution-engine-api.md#integration-contracts) for the responsibilities on each side of these exchanges.
 
 ### Cloud-managed engine lifecycle
 
@@ -95,29 +111,35 @@ Cloud owns namespace placement. Each publication has a durable opaque version th
 
 ### Starting point for placement and routing
 
-V1 starts with one engine. Go reconciles intended placements with observed publications and routes authorized invocations to confirmed instances. [Go placement and recovery](go-backend-roadmap.md#observe-live-engines)
+V1 starts with one engine. Go forwards authorized invocations to the application’s assigned engine when it is ready, connected, and accepting requests. [Go router](go-backend-roadmap.md#go-backend-components)
 
-K3s ingress could direct public requests to the Go backend through a Kubernetes Service. The ingress design remains open.
+Each Full Cloud installation exposes the browser UI, REST API, and MCP endpoint on one hostname through a single HTTPS ingress on K3s. The ingress routes all three interfaces through a Kubernetes Service to the Go backend. Go checks caller permissions on each Cloud operation. The Java engine API stays internal. Configure ingress timeouts to allow synchronous invocations to run for their intended duration.
 
-An ingress NetworkPolicy on the engine pods will restrict pod-to-pod access to the engine API port to Go management backend pods in the management namespace.
+An ingress NetworkPolicy on the engine pods will restrict pod-to-pod access to the engine API port to Go backend pods in the management namespace.
 
-On K3s, cert-manager will provision and rotate the mTLS certificates for communication between the Go management backend and the Java engines. The Go backend will use one client credential. All Java engine pods, including new and replacement pods, will use one shared server credential.
+On K3s, cert-manager will provision and rotate the mTLS certificates for communication between the Go backend and the Java engines. The Go backend will use one client credential. All Java engine pods, including new and replacement pods, will use one shared server credential.
 
-### Open questions for a Kubernetes deployment
+On a full cluster replacement, the installation configures Go and the Java engines to trust the replacement installation’s issuer. Cert-manager issues a fresh Go client credential and a fresh shared engine server credential. The operator can recover the installation without the previous client and server private keys.
 
-- **Pod management.** A Kubernetes Deployment is a candidate for maintaining engine pods. Whether K3s needs a readiness probe for rollouts remains open. [Java startup contract](java-execution-engine-roadmap.md#startup-and-readiness)
-- **Cluster recovery.** How will a replacement cluster recover its credentials and [environment encryption key](go-backend-roadmap.md#encryption-at-rest) and remount the durable filesystems?
-- **Application credentials.** What role, if any, would Kubernetes Secrets have in managing application credentials?
+On a full cluster replacement, the installer also generates a fresh Console API key for the environment and writes it to the Kubernetes Secret shared by the Go Console proxy and the Java engines. An ordinary pod replacement reuses the existing Secret. [Console authentication contract](execution-engine-api.md#integration-contracts)
+
+A single-replica Kubernetes Deployment maintains the V1 engine pod. It uses the `Recreate` strategy so a planned rollout terminates the old pod before starting its replacement. Go restores the intended publications on the replacement JVM.
+
+During rollouts, K3s counts an engine pod as ready once its readiness probe confirms that the JVM can serve its Console instance snapshot, even with zero applications installed. [Java startup contract](java-execution-engine-roadmap.md#startup-and-readiness)
 
 ### Durable execution traces
 
-Full Cloud uses one shared `ReadWriteMany` volume with separate directories for engine-written traces, manually uploaded traces, staged or published skill packs, and [namespace skill catalogs](go-backend-roadmap.md#namespace-skill-catalog). The storage provider encrypts the entire volume when encryption is enabled. A fresh V1 installation provisions an encrypted Longhorn volume by default. An operator can supply a compatible shared volume with or without encryption. The engine writes to the [engine trace directory](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces). Go mounts that directory read-only and has write access to the uploads, packs, and catalog directories. The provider must support concurrent access across K3s nodes and same-directory atomic rename.
+Full Cloud uses one shared `ReadWriteMany` volume with separate directories for engine-written traces, manually uploaded traces, staged or published skill packs, [application invocation and operations logs](go-backend-roadmap.md#application-operations-log), and [namespace skill catalogs](go-backend-roadmap.md#namespace-skill-catalog). The storage provider encrypts the entire volume when encryption is enabled. A fresh V1 installation provisions an encrypted Longhorn volume by default. An operator can supply a compatible shared volume with or without encryption. The engine writes to the [engine trace directory](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces). Go mounts that directory read-only and has write access to the uploads, packs, application log, and catalog directories. The provider must support concurrent access across K3s nodes, same-directory atomic rename, and exclusive file locks honored across nodes. Verify locking on the mounted volume using pods on two different nodes: while one pod holds an exclusive lock, the other must be unable to acquire it on the same file. After release, the second pod must be able to acquire it.
+
+The volume also holds the [Go backend configuration directory](go-backend-roadmap.md#go-backend-configuration) and the separate [operator-only key recovery directory](go-backend-roadmap.md#encryption-at-rest). Include both in the protected off-cluster volume backup so each backup captures the configuration alongside the data.
+
+For the default encrypted Longhorn volume, the operator generates a volume passphrase, saves it in a password manager accessible after cluster loss, and enters it at a hidden installer prompt. Before provisioning the volume, the installer creates the Kubernetes Secret referenced by the encrypted StorageClass. On a replacement cluster, the operator supplies the same saved passphrase to recreate the Secret before mounting the surviving volume or restoring its encrypted backup.
 
 For example, an operator with an internal NFS server can export a directory for traces, bind a Kubernetes persistent volume for that export to a `ReadWriteMany` claim, and supply the claim at installation. The operator chooses whether the storage backing the NFS export is encrypted at rest.
 
-To migrate the shared volume, pause writers, copy or restore all directories, and switch the engine and Go mounts. Verify a stored pack, a manual upload, historical trace lookup, and a newly completed trace before retiring the old volume. Verify that a replacement cluster can recover the files using an off-cluster backup and any required volume key.
+To migrate the shared volume, pause writers, copy or restore all directories, and switch the workload mounts. Verify that Go starts with the restored settings. Verify a stored pack, a manual upload, historical trace lookup, and a newly completed trace before retiring the old volume. Verify that a replacement cluster can recover the files using an off-cluster backup and any required volume key.
 
-The [Full Cloud trace cleanup job](go-backend-roadmap.md#trace-cleanup-job) manages manual-upload expiry and retained-engine-trace storage on this volume.
+The [Full Cloud cleanup job](go-backend-roadmap.md#trace-cleanup-job) manages manual-upload expiry, retained engine traces, and historical pack ZIPs on this volume.
 
 The [Go diagnostics roadmap](go-backend-roadmap.md#look-up-retained-traces) defines run history and authorized lookup.
 
@@ -159,7 +181,7 @@ The web UI will give visitors a place to learn what Loomspan Cloud is and sign u
 
 ### Relationship to other components
 
-The UI will give users a view of their running applications. The status information and management controls it will offer are still open.
+The UI shows owners and Managers the [application status reported by the Cloud API](go-backend-roadmap.md#application-status). The design of the management controls remains open.
 
 ## Loomspan Console in the cloud
 
@@ -183,6 +205,8 @@ At confirmation, show **Retain for** with the choices **1 week**, **1 month**, *
 Full Cloud binds each upload to its destination application and checks [upload permissions](go-backend-roadmap.md#uploaded-trace-permissions). Console-only binds it to the connected target and destination namespace. Switching scope shows that scope's uploads. Uploads survive Console restarts and Cloud pod replacement and appear separately from engine-recorded run history. Expiry or manual deletion removes only that saved import, even if its trace ID matches a retained run.
 
 ### Console navigation and modules
+
+Console handles a browser disconnect the same way on every screen. It shows “Disconnected” and reloads the current view when the connection returns. The reload reads the current state. Repeating an action requires a new user request.
 
 When Console moves from Loomspan Framework to Loomspan Cloud, design its navigation around complete user workflows. Both profiles use the same diagnostic views and navigation labels. Group Cloud management workflows, such as publications and membership, under a distinct top-level management section.
 
@@ -212,7 +236,7 @@ V1 invocations are synchronous. The [Go response visibility rules](go-backend-ro
 
 If the API cannot return an execution result, it will distinguish two outcomes.
 
-- **Rejected before execution** means the cloud can confirm that the skill never started. If no engine is ready to serve the application's requested version, Cloud promptly reports that the application is temporarily unavailable. The caller can safely retry that invocation.
+- **Rejected before execution** means the cloud can confirm that the skill never started. If Go has no eligible engine for the application, Cloud promptly reports that the application is temporarily unavailable. The caller can safely retry that invocation.
 - **Outcome unknown** means the cloud dispatched the invocation and lost contact with the engine before it could confirm the result. The skill may have completed or produced side effects. Retrying could repeat them.
 
 Framework admission is single-use and local to the engine process. We will defer a durable job queue until there is a requirement for accepted work to survive engine loss.

@@ -24,13 +24,13 @@ Framework validates the skill definitions, their references, and the composed ex
 
 ### Startup and readiness
 
-Go discovers engine pods through the K3s Kubernetes API. When the Console proxy reads its first authenticated instance snapshot from a newly discovered JVM, Go can immediately send that engine its first publication, even with zero Cloud applications installed. The pod watch and the Console connection provide the discovery and observation paths for V1, so engines need no separate event bus or etcd registration. Whether K3s needs a readiness probe for rollouts is a separate deployment decision.
+Go discovers engine pods through the K3s Kubernetes API. When the Console proxy reads its first authenticated instance snapshot from a newly discovered JVM, Go can immediately send that engine its first publication, even with zero Cloud applications installed. The pod watch and the Console connection provide the discovery and observation paths for V1, so engines need no separate event bus or etcd registration. The [Cloud deployment roadmap](roadmap.md#starting-point-for-placement-and-routing) defines the K3s rollout readiness probe.
 
-An application becomes eligible for routing on a ready, non-terminating pod once the Console proxy has confirmed the requested namespace and publication version on the connected JVM instance. Placement and routing read observed engine state from the proxy's in-memory projection.
+Go forwards an application's invocations to its assigned engine pod when the pod is ready, connected, and non-terminating.
 
 ### Planned engine shutdown
 
-V1 deliberately runs a single engine for testing and accepts downtime during engine restarts and replacements. While that engine is unavailable, Go returns a temporarily unavailable response to new invocations until an engine is eligible to serve the requested publication. This response is the expected V1 behavior. Defer work to maintain continuous availability, including overlapping engine pods and failover, to V2. [Go routing during shutdown](go-backend-roadmap.md#invocation-response-loss)
+V1 deliberately runs a single engine for testing and accepts downtime during engine restarts and replacements. While that engine is unavailable, Go returns a temporarily unavailable response to new invocations until an engine is eligible to receive invocations for the application. This response is the expected V1 behavior. Defer work to maintain continuous availability, including overlapping engine pods and failover, to V2. [Go routing during shutdown](go-backend-roadmap.md#invocation-response-loss)
 
 When K3s begins a planned pod shutdown, the engine stops accepting new invocations and becomes unready. It rejects any invocation arriving after admission closes as rejected before execution, including requests already in transit from Go.
 
@@ -95,20 +95,6 @@ Set `loomspan.execution-trace.directory` in the engine’s host startup configur
 Framework writes active traces with the suffix `.execution-trace.ndjson.in-progress`. After closing the `TRACE_COMPLETED` append, it atomically renames retained files in the same directory to `.execution-trace.ndjson`. Immediately discarded traces are deleted under the active name. Files retained temporarily for Console’s completion grace period can also receive the completed name. Go scans only completed names and applies the [history indexing rule](go-backend-roadmap.md#look-up-retained-traces) to their terminal records. Verify same-directory atomic rename on the deployed shared volume and verify a replacement pod can read its predecessor’s completed traces.
 
 Framework upgrades, including engine and proxy rollout order and access to retained traces across versions, are outside V1 scope.
-
-## First single-engine milestone
-
-Implement the Cloud ZIP adapter, validate and publish endpoints, mTLS wiring, and Go integration in the Spring Boot host.
-
-Start an engine with zero Cloud applications installed. Have the Go Console proxy read its first `GET /_loomspan/observability/v1/instance` snapshot using mTLS and the environment’s Console API key. Immediately send a pack using Framework defaults through the engine’s publish endpoint with an empty value map and the application’s effective runtime settings. Assert that the first publish request succeeds. Before the first invocation, verify the success response triggers a proxy refresh and routing sees the requested namespace and version on the JVM identified by the first snapshot. Verify a failed replacement leaves the previous version serving. Then publish a new version and terminate the pod after Go receives `204` but before Console observes the update. Verify Go restores that version on the replacement and sends it the first invocation only after Console confirms the namespace and version on the new JVM.
-
-That first invocation must execute a real, deterministic skill from the restored publication on the replacement JVM. The ticket writer chooses a fixture with a known input and expected output that runs without an external model call. Verify that the caller receives that expected output through Go.
-
-Test the [validate and publish responses](execution-engine-api.md#validate-and-publish-responses) with an invalid staged pack and a publication exception. In the invocation milestone, test success and skill error with trace persistence set to `NEVER`. Verify that the administrator's [execution-view switch](execution-engine-api.md#invocation-metadata) controls whether the invoker receives `executionView` in each case and the available `debug` and `diagnosis` fields on failure.
-
-## After V1: Loomspan test suite
-
-The first follow-on project after Cloud V1 is a Loomspan test suite in a separate repository. It will provide repeatable integration tests for Framework and Cloud as both evolve. V1 tickets in this repository cover their focused milestone checks.
 
 ## After V1: engine capacity
 

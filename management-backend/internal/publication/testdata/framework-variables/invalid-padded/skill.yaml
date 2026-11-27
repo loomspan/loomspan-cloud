@@ -1,3 +1,0 @@
-executor: http
-config:
-  value: { $var: ' app.region' }

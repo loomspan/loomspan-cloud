@@ -1,4 +1,0 @@
-executor: http
-config:
-  ? { nested: [{ $var: key.part }] }
-  : { $var: value }

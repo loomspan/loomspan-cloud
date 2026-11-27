@@ -4,9 +4,9 @@ A user can take an application from setup through its first run and explain the 
 
 ## Manage an application and its users
 
-A user signs in by email magic link and can create an application. The application maps to a Framework namespace. Its sole owner can grant Manager or Caller access and assign separate skill roles by email before a user first signs in. Once the user verifies that address through the magic link, they gain the assigned access to that application. [Go application permissions](go-backend-roadmap.md#application-permissions)
+A user signs in with a one-time email code and can create an application. The application maps to a Framework namespace. Its sole owner can grant Manager or Caller access and assign separate skill roles by email before a user first signs in. Once the user verifies that address with the code, they gain the assigned access to that application. [Go application permissions](go-backend-roadmap.md#application-permissions)
 
-Users can authorize an MCP companion in their browser. The companion receives its own tokens and can reconnect across sessions with the user’s current permissions. Token lifetimes remain open.
+Users can work with their AI companion through MCP using the same Cloud identity and application permissions as in the web UI. The companion receives its own tokens and can reconnect across sessions with the user’s current permissions. Token lifetimes remain open.
 
 ## Prepare and publish skills
 

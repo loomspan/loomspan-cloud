@@ -1,3 +1,0 @@
-model: primary
-config: { $var: excluded }
-prompt: { $var: excluded }
