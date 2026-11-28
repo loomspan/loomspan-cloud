@@ -2,7 +2,7 @@
 
 ## Outcome
 
-A real signed-in owner can create an application and safely repeat the call after losing the response. Later uploads target the returned immutable application ID and use its namespace as the ZIP root.
+An authenticated owner can create an application and safely repeat the call after losing the response. Later uploads target the returned immutable application ID and use its namespace as the ZIP root.
 
 ## Context
 
@@ -12,20 +12,23 @@ GitHub PR 2, Go backend Phase 1. Use the Full Cloud process from PR 2.1.1 and na
 
 ## Requirements
 
-- Use the installation’s Supabase email-code sign-in and a real user access token for the REST workflow. Verify asymmetric signature against the trusted issuer’s keys, issuer, intended audience and expiry locally. Use verified email for identity. One exported normalizer trims surrounding whitespace and lowercases the entire address. Cloud verifies current access on each ordinary request.
+- Accept the installation’s Supabase user access token through the public REST bearer-token path. Verify the asymmetric signature against the trusted issuer’s keys, the issuer, expiry, and audience locally. For browser and REST user sessions, require `aud` to equal `authenticated` or contain that exact value in an array. This fixed value requires no installer setting. Phase 3 uses the canonical public MCP endpoint URL as the expected audience for MCP requests. Use verified email for identity. One exported normalizer trims surrounding whitespace and lowercases the entire address. Cloud verifies current access on each ordinary request.
 - Get or create the stable database-generated numeric owner ID by normalized email, including under concurrency. Retain it across application lifetimes. Persist an application row with ID, owner, slug, namespace, creation time and lifecycle state. Enforce owner/slug uniqueness. Different owners may reuse the same slug. Enforce package naming rules and the 61-character maximum on the full u{numericUserId}-{appSlug}; report 400 and the maximum slug length for this prefix when exceeded.
-- Return ID and namespace for new and existing applications and identify an existing result. Preserve existing settings, memberships and publication. A Deleting row reserves its slug and yields 409 with its ID and state. New applications have requests enabled, no current publication, execution views off and the default ONERROR persistence policy.
-- Provide the common application permission check for subsequent tickets. Owner inherits Manager and Caller. Inaccessible and missing applications give the same 404 to an authenticated user, insufficient role gives 403, and unreadable access data gives 503 before any write or dispatch. Membership management, companion OAuth and API keys belong to Phase 3.
+- Return ID and namespace for new and existing applications and identify an existing result. Preserve all existing application state on repeat creation. A Deleting row reserves its slug and yields 409 with its ID and state. New applications have requests enabled, no current publication, execution views off and the default ONERROR persistence policy.
+- Implement the shared application permission check using the stored owner in Phase 1. The owner inherits Manager and Caller permissions. After a successful database lookup, return the same 404 for a missing application and for one owned by another user. If Go cannot read the access data, return 503 before any write or dispatch.
 
 ## Acceptance criteria
 
-- [ ] Use an email-code session to create an application via REST. Verify untrusted, expired, or wrong-audience tokens cannot create or access it; the caller cannot choose another owner by supplying an email.
+Provide a test fixture that signs short-lived user tokens with a local asymmetric test key and serves its public verification keys at the configured test issuer’s JWKS endpoint, reachable from the backend pod. Configure only the isolated test deployment to trust that issuer. Send the token as a REST bearer credential through the ordinary verifier. Include the issuer, expiry, `authenticated` audience and user identity claims needed by the production contract, with distinct verified email identities for the owner and nonowner cases. Keep the signing key in the fixture and credentials out of evidence. The post-V1 `loomspan-cloud-test-suite` scenario owns the first real email-code sign-in.
+
+- [ ] Create an application via REST using a locally signed owner token. Exercise the browser/REST verifier with otherwise valid tokens: accept `"authenticated"` and an array containing it; reject a missing `aud` and an audience containing only the MCP endpoint URL before any application read or write. Untrusted or expired tokens cannot create or access an application, and supplying an email cannot select another owner.
 - [ ] Repeat and race creates for the same owner/slug and verify one application and stable namespace; another owner can use the slug independently. Existing state survives repeat creation, including the 409 behavior for a seeded Deleting row.
-- [ ] Verify namespace boundaries, owner normalization, creation defaults and access-check outcomes, including the unavailable-database case.
+- [ ] Verify namespace boundaries, owner normalization and creation defaults.
+- [ ] Exercise the shared check at both Manager and Caller permission levels with the signed-in owner. Both pass. With a second signed-in user, compare the response for the owner’s application with the response for a missing application. Both must have the same 404 status and body. Make the access lookup unavailable and verify 503 with zero writes and zero dispatches.
 
 ## Handoff and deferred work
 
-Use [PR 2.1.1](PR-2.1.1-console-home.md) and [PR 2.1.2](PR-2.1.2-backend-readiness.md) as the local baseline. Give [PR 2.1.5](PR-2.1.5-stage-and-validate.md), [PR 2.1.6](PR-2.1.6-first-publication.md) and [PR 2.1.7](PR-2.1.7-invoke-first-skill.md) the REST sign-in exercise, creation operation and shared permission-check entry points. [PR 2.1.7](PR-2.1.7-invoke-first-skill.md) repeats creation with a real session at phase close. [Phase 3](../phases/go-backend-phase-3-access-and-companions.md) owns membership administration, companion OAuth and integration keys. [Phase 4](../phases/go-backend-phase-4-diagnostics-and-deletion.md) drives actual deletion; this ticket can exercise the reserved-slug rule using a seeded Deleting row.
+Use [PR 2.1.1](PR-2.1.1-console-home.md) and [PR 2.1.2](PR-2.1.2-backend-readiness.md) as the local baseline. Give [PR 2.1.5](PR-2.1.5-stage-and-validate.md), [PR 2.1.6](PR-2.1.6-first-publication.md) and [PR 2.1.7](PR-2.1.7-invoke-first-skill.md) the test issuer and token fixture, creation operation and shared permission-check entry points. [PR 2.1.7](PR-2.1.7-invoke-first-skill.md) repeats creation using a fresh fixture token at phase close. [Phase 3](../phases/go-backend-phase-3-access-and-companions.md) owns the membership schema and lookup, membership administration, the end-to-end 403 check for insufficient role, companion OAuth and integration keys. [Phase 4](../phases/go-backend-phase-4-diagnostics-and-deletion.md) drives actual deletion; this ticket can exercise the reserved-slug rule using a seeded Deleting row.
 
 ## Pipeline notes
 

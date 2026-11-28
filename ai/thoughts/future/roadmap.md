@@ -86,9 +86,9 @@ Cloud applies the per-application [ownership and role rules](go-backend-roadmap.
 
 Each Full Cloud installation trusts one dedicated Supabase Auth issuer, which signs user access tokens with an asymmetric key. Go retrieves public verification keys from the trusted issuer configured for the installation and verifies the signature, issuer, intended audience, and expiry locally. A replacement Go backend retrieves those public keys using the restored configuration.
 
-Full Cloud MCP companions obtain their own Supabase access tokens through [the shared sign-in flow](go-backend-roadmap.md#companion-sign-in). Browser, REST, and MCP share token verification. For MCP, the installer derives the expected audience from the installation's public URL using the canonical public MCP endpoint URL. Go requires the verified token's audience to match that URL or include it in the audience array. For each companion operation, Go checks the user's current permission for the requested action. Personal API keys and unattended scripts that manage applications on a user's behalf are outside V1.
+The shared verifier selects the expected audience by interface. For browser and REST user sessions, the expected audience is fixed at `authenticated` and requires no operator configuration. Go accepts an `aud` string equal to the expected value or an `aud` array containing that exact value. It rejects a missing audience or one that lacks the expected value.
 
-The issuer and audience design above is settled for V1. Backend tickets can use this contract directly without a separate design decision on the literal Supabase audience for browser or REST requests.
+Full Cloud MCP companions obtain their own Supabase access tokens through [the shared sign-in flow](go-backend-roadmap.md#companion-sign-in). For MCP requests the expected audience is the canonical public MCP endpoint URL, derived by the installer from the installation's public URL. For each companion operation, Go also checks the user's current permission for the requested action. Personal API keys and unattended scripts that manage applications on a user's behalf are outside V1.
 
 In both models, the shared Cloud API checks permission to invoke the target application before routing to its namespace. Go uses Cloud ownership and membership to authorize Cloud operations. The Java engine wrapper receives the end user's identity and only the skill roles for the target application. Framework then enforces each skill's role requirements at entry and when calling child skills. Cloud separately enforces management permissions such as publishing the application or managing its users.
 
@@ -96,6 +96,7 @@ Internal engine requests require authenticated Go client identity, including req
 
 ### Authentication acceptance criteria
 
+- Verify a browser or REST user session with an otherwise valid token succeeds when `aud` equals `authenticated` or includes it in an array. Verify a missing audience and an audience containing only the MCP endpoint URL both fail before dispatch.
 - Starting with a supported companion and the installation's MCP URL, exercise the browser handoff above both signed out and with a valid Cloud session. Verify the named companion connects in one action in each case and only the signed-out user needs the emailed code. Complete both flows through callback, token exchange, and automatic application discovery using the companion's own token, with no separate account, manual client registration, or companion-specific role assignment.
 - Use an account that owns one application and is a Caller in another. Verify discovery lists both namespaces with the correct Cloud role and omits inaccessible applications, without asking the user to configure namespaces or roles.
 - Verify the access token issued by the configured sign-in flow contains the derived MCP audience and permits an authorized MCP operation. Go rejects an otherwise valid token from the trusted issuer before dispatch when that audience is missing or wrong. Go also rejects a token from another installation's issuer.
@@ -188,6 +189,8 @@ The UI shows users with Manager access the [application status reported by the C
 ## Loomspan Console in the cloud
 
 ### Console deployment profiles
+
+Framework is in development with no clients. For the Go Console migration, Console and Framework evolve together at the existing `consoleCompatibilityVersion`. Console continues to check the target for an exact match.
 
 V1 has one Console with shared diagnostic operations, browser views, and MCP tools. The deployment profile determines how Console obtains authorized access to a target.
 
