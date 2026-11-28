@@ -17,8 +17,8 @@ Find one of several concurrent retained runs using its caller's session ID with 
 
 Populate two applications, A and B, across every application data root on the shared volume. Include retained pack ZIPs, manually uploaded traces, engine-written traces, invocation and operations logs, and skill catalogs for each. Record B's file paths and contents. With work admitted for A, request its deletion through Go and verify file cleanup waits for confirmed drain or engine termination. After deletion, inspect each root directly. Verify A's pack directory and engine-trace directory are gone, no files belonging to A remain in any root, and every recorded B file is still present with identical bytes.
 
-Recreate A with the same owner and slug and a fresh application ID. Resume a retention pass paused after selecting files for the original A, deliver its usage report, and verify the recreated application's files survive and its quota screen excludes the old measurements. [Slug reuse during retention](../future/go-backend-roadmap.md#trace-cleanup-job)
+Recreate A with the same owner and slug and the same namespace as its application ID. Resume a retention pass paused after selecting files for the original A, deliver its usage report, and verify the recreated application's files survive and its quota screen excludes the old measurements. [Slug reuse during retention](../future/go-backend-roadmap.md#trace-cleanup-job)
 
 ## Handoff
 
-Draft Phase 4 tickets from the merged invocation, permission, publication, and filesystem code. Use the V1 demo and the linked contracts for final backend verification. The private engine namespace, publication version, root session ID, and Cloud application ID each retain their established roles throughout the demonstration.
+Draft Phase 4 tickets from the merged invocation, permission, publication, and filesystem code. Use the V1 demo and the linked contracts for final backend verification. Use the same namespace name in Cloud requests and engine observations throughout the demonstration. Identify the publication by its version and the run by its root session ID.
