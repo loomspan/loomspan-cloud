@@ -26,7 +26,7 @@ Framework validates the skill definitions, their references, and the composed ex
 
 Go discovers engine pods through the K3s Kubernetes API. When the Console proxy reads its first authenticated instance snapshot from a newly discovered JVM, Go can immediately send that engine its first publication, even with zero Cloud applications installed. The pod watch and the Console connection provide the discovery and observation paths for V1, so engines need no separate event bus or etcd registration. The [Cloud deployment roadmap](roadmap.md#starting-point-for-placement-and-routing) defines the K3s rollout readiness probe.
 
-Go forwards an application's invocations to its assigned engine pod when the pod is ready, connected, and non-terminating.
+A ready pod can still be waiting for an application’s namespace to appear after startup or recovery. Go uses the Console proxy’s live view to apply the [namespace routing rule](roadmap.md#starting-point-for-placement-and-routing).
 
 ### Planned engine shutdown
 
@@ -44,11 +44,11 @@ For requests already dispatched, Go handles any engine response normally. If shu
 
 | Component | Responsibility |
 | --- | --- |
-| Cloud administration and Go backend | Own the destination application's administrative settings, defaults, allowed choices, and permissions. For validation or publication, compute one complete set of effective settings from Cloud policy and the application's saved selections. Send that set separately from the portable ZIP. Console shows owners which settings are active and which edits are pending. |
+| Cloud administration and Go backend | Own the destination application's administrative settings, defaults, allowed choices, and permissions. For validation or publication, compute one complete set of effective settings from Cloud policy and the application's saved selections. Send that set separately from the portable ZIP. Console shows users with Manager access which settings are active and which edits are pending. |
 | Cloud Java wrapper in the execution engine | Accept the settings from the authenticated Go backend. Reject missing or invalid administrative settings. Construct one in-memory Framework execution configuration from the portable sections and Cloud's supplied session and trace settings. Call `SkillReloader.validate` for a staged check, or the private, versioned, explicit-map `prepare` overload followed by `publish` for publication. Include the offending path in the message for an invalid administrative setting. |
 | Embedded Loomspan Framework | Validate the composed candidate, resolve application variables during preparation, and capture the settings with the generation. Enforce mission timeout, depth, the six session quotas, and attachment size during execution. The entry generation's trace persistence policy determines which completed traces are retained. A failed preparation leaves the serving generation in place. |
 
-Trace persistence is the owner-selectable administrative runtime setting in V1. New applications use `ONERROR`. Owners can select `NEVER`, `ONERROR`, or `ALWAYS`.
+Trace persistence is the configurable administrative runtime setting in V1. New applications use `ONERROR`. Users with Manager access can select `NEVER`, `ONERROR`, or `ALWAYS`.
 
 Cloud supplies the following session limits explicitly on each publish request. Console displays them read-only. These values are Cloud policy, so changing the embedded Framework version alone does not change them.
 
@@ -87,6 +87,12 @@ For an application restart, the wrapper prepares and publishes a fresh Framework
 **V1 invocation cutover.** Go routes each invocation to an eligible engine. Framework runs the invocation on the generation active in its namespace when Framework accepts it. Work already accepted finishes on its captured generation, including reachable child skills. Once a replacement is active, Framework uses it for every newly accepted invocation, including requests already in transit. This rule applies to every input shape and transport. Go and the Java wrapper leave generation selection to Framework.
 
 The wrapper adapts the ZIP to Framework skill documents and execution configuration, supplies the value map, private visibility, and the assigned version to `SkillReloader.prepare`, then publishes the prepared update. The current generation keeps serving during preparation and after a failed update. Publishing zero YAML skill documents removes previously published YAML skills and leaves the namespace installed.
+
+### Verifying namespace drain
+
+Implement the [Console drain observation](execution-engine-api.md#namespace-drain-observation) using Framework’s knowledge of admitted work and generation ownership. Verify that release covers physical completion of child work and the final write, rename, or removal of its trace file.
+
+Exercise the registration race deterministically. Admit a call and pause it before its first active-execution record. Publish another generation and then the deletion’s empty pack, leaving the paused call two generations behind. With the namespace’s active-executions list empty, verify the drain signal is false and Go preserves the application’s files and row. Resume the call and hold its final trace write; the signal must still be false. Disconnect Console, finish the write and release the call. Verify Go waits until a fresh matching snapshot after reconnect reports true before proceeding with cleanup. Keep a call active in a second application throughout to verify namespace isolation.
 
 ### Application diagnostics and retained traces
 

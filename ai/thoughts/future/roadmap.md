@@ -38,13 +38,15 @@ Full Cloud exposes the web UI, REST for programmatic access, and MCP for AI comp
 
 All externally accessible operations should pass through a shared internal API before reaching the underlying platform. This is where Loomspan Cloud should enforce permissions and the rules for administration and debugging. For example, a request to read an application’s traces should go through the same access check whether it comes from the web UI, REST, or MCP.
 
-Within the platform, modules also communicate through internal APIs. Each module owns its functionality and defines how other modules can call it.
+Within the platform, modules also communicate through internal APIs. Each module owns its functionality and defines how other modules can call it. The four components inside the Go backend use in-process calls. The Java engine and the scheduled cleanup job communicate with Go across process boundaries.
 
 V1 Cloud performs no content sanitization or redaction, including in logs, diagnostics, and API responses.
 
 ### Platform authentication and database
 
 V1 uses Supabase Auth for sign-in and Postgres for Loomspan Cloud’s internal records, including application memberships and role assignments. The operator supplies the Auth and database endpoints at installation. Operators can use hosted Supabase or run Supabase Auth and Postgres inside their own network. For an internal installation, the operator provisions and maintains both services and configures delivery of one-time email sign-in codes.
+
+The Go backend uses a native PostgreSQL connection for migrations and runtime database operations in both hosted and internal installations. [Go backend configuration](go-backend-roadmap.md#go-backend-configuration)
 
 Development, QA, and production will use K3s so the Go backend and Java engines use the same deployment model in every environment. Oracle Cloud Always Free compute remains a hosting option.
 
@@ -111,7 +113,7 @@ Cloud owns namespace placement. Each publication has a durable opaque version th
 
 ### Starting point for placement and routing
 
-V1 starts with one engine. Go forwards authorized invocations to the application’s assigned engine when it is ready, connected, and accepting requests. [Go router](go-backend-roadmap.md#go-backend-components)
+In V1, the installation’s single engine is the intended placement for every application. For an authorized invocation with requests enabled, Go rejects the request before dispatch if the target application ID has no recorded current publication. This applies even when the engine still hosts an empty generation from a deleted application with the same namespace. Once Go records the application's first publication, the router uses the Console proxy’s live engine view. It forwards the request when the assigned engine is ready, connected, accepting requests, and observed to host the application’s namespace. If no engine meets those conditions, Go reports that the application is temporarily unavailable.
 
 Each Full Cloud installation exposes the browser UI, REST API, and MCP endpoint on one hostname through a single HTTPS ingress on K3s. The ingress routes all three interfaces through a Kubernetes Service to the Go backend. Go checks caller permissions on each Cloud operation. The Java engine API stays internal. Configure ingress timeouts to allow synchronous invocations to run for their intended duration.
 
@@ -129,7 +131,7 @@ During rollouts, K3s counts an engine pod as ready once its readiness probe conf
 
 ### Durable execution traces
 
-Full Cloud uses one shared `ReadWriteMany` volume with separate directories for engine-written traces, manually uploaded traces, staged or published skill packs, [application invocation and operations logs](go-backend-roadmap.md#application-operations-log), and [namespace skill catalogs](go-backend-roadmap.md#namespace-skill-catalog). The storage provider encrypts the entire volume when encryption is enabled. A fresh V1 installation provisions an encrypted Longhorn volume by default. An operator can supply a compatible shared volume with or without encryption. The engine writes to the [engine trace directory](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces). Go mounts that directory read-only and has write access to the uploads, packs, application log, and catalog directories. The provider must support concurrent access across K3s nodes, same-directory atomic rename, and exclusive file locks honored across nodes. Verify locking on the mounted volume using pods on two different nodes: while one pod holds an exclusive lock, the other must be unable to acquire it on the same file. After release, the second pod must be able to acquire it.
+Full Cloud uses one shared `ReadWriteMany` volume with separate directories for engine-written traces, manually uploaded traces, staged or published skill packs, [application invocation and operations logs](go-backend-roadmap.md#application-operations-log), and [namespace skill catalogs](go-backend-roadmap.md#namespace-skill-catalog). The storage provider encrypts the entire volume when encryption is enabled. A fresh V1 installation provisions an encrypted Longhorn volume by default. An operator can supply a compatible shared volume with or without encryption. The engine writes to the [engine trace directory](java-execution-engine-roadmap.md#application-diagnostics-and-retained-traces). Go mounts the engine trace directory read-write so its [application deletion routine](go-backend-roadmap.md#application-permissions) can remove the deleted application's trace directory. Go also has write access to the uploads, packs, application log, and catalog directories. The provider must support concurrent access across K3s nodes, same-directory atomic rename, and exclusive file locks honored across nodes. Verify locking on the mounted volume using pods on two different nodes: while one pod holds an exclusive lock, the other must be unable to acquire it on the same file. After release, the second pod must be able to acquire it.
 
 The volume also holds the [Go backend configuration directory](go-backend-roadmap.md#go-backend-configuration) and the separate [operator-only key recovery directory](go-backend-roadmap.md#encryption-at-rest). Include both in the protected off-cluster volume backup so each backup captures the configuration alongside the data.
 
@@ -139,13 +141,13 @@ For example, an operator with an internal NFS server can export a directory for 
 
 To migrate the shared volume, pause writers, copy or restore all directories, and switch the workload mounts. Verify that Go starts with the restored settings. Verify a stored pack, a manual upload, historical trace lookup, and a newly completed trace before retiring the old volume. Verify that a replacement cluster can recover the files using an off-cluster backup and any required volume key.
 
-The [Full Cloud cleanup job](go-backend-roadmap.md#trace-cleanup-job) manages manual-upload expiry, retained engine traces, and historical pack ZIPs on this volume.
+The [Full Cloud cleanup job](go-backend-roadmap.md#trace-cleanup-job) expires manual uploads, trims retained engine traces, and requests pack-history trimming from Go by application ID. Only Go needs the pack directory mounted for retention.
 
 The [Go diagnostics roadmap](go-backend-roadmap.md#look-up-retained-traces) defines run history and authorized lookup.
 
 ### Tenant isolation and shared capacity
 
-Application owners can publish skills and runtime configuration. Cloud enables only Loomspan extensions it has vetted and configured for the shared engine. Vetting an extension includes verifying that it keeps each tenant's supplied configuration, credentials, and data isolated when multiple applications use it in the same JVM.
+Users with Manager access can publish skills and runtime configuration. Cloud enables only Loomspan extensions it has vetted and configured for the shared engine. Vetting an extension includes verifying that it keeps each tenant's supplied configuration, credentials, and data isolated when multiple applications use it in the same JVM.
 
 Each application can configure a shared executor once for all its skills that use it.
 
@@ -181,7 +183,7 @@ The web UI will give visitors a place to learn what Loomspan Cloud is and sign u
 
 ### Relationship to other components
 
-The UI shows owners and Managers the [application status reported by the Cloud API](go-backend-roadmap.md#application-status). The design of the management controls remains open.
+The UI shows users with Manager access the [application status reported by the Cloud API](go-backend-roadmap.md#application-status). The design of the management controls remains open.
 
 ## Loomspan Console in the cloud
 
@@ -189,7 +191,7 @@ The UI shows owners and Managers the [application status reported by the Cloud A
 
 V1 has one Console with shared diagnostic operations, browser views, and MCP tools. The deployment profile determines how Console obtains authorized access to a target.
 
-- **Full Cloud.** Public and internal deployments use the same Cloud profile. The application picker lists only applications the user owns or manages. A user whose only role for an application is Caller cannot open any Cloud UI or Console screen for that application, including by direct link. Diagnostic access follows the [application permissions](go-backend-roadmap.md#application-permissions) for the selected namespace, even when several applications share an engine.
+- **Full Cloud.** Public and internal deployments use the same Cloud profile. The application picker lists only applications where the user has Manager access. A user whose only role for an application is Caller cannot open any Cloud UI or Console screen for that application, including by direct link. Diagnostic access follows the [application permissions](go-backend-roadmap.md#application-permissions) for the selected namespace, even when several applications share an engine.
 - **Console-only.** A developer runs the Console executable to inspect a Framework application directly. In V1 the browser UI, REST API, and MCP endpoint listen only on loopback. The browser uses local pairing and MCP uses its own local credential. Console can connect outbound to a remote Framework target using authenticated HTTPS with certificate verification. The operator can inspect every namespace that the connected target exposes to those credentials, including `default` when present. This diagnostic access is independent of Cloud application ownership.
 
 Each browser tab keeps its own selection. Every scoped MCP or REST call explicitly names the application ID in Full Cloud or the namespace on the connected target in Console-only. In Full Cloud, Go resolves the application ID to its namespace and checks the caller's permission for the requested operation. Calls from a companion and selections in other tabs leave the current tab's selection intact.

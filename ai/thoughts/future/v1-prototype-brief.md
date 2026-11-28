@@ -10,19 +10,19 @@ Users can work with their AI companion through MCP using the same Cloud identity
 
 ## Prepare and publish skills
 
-The owner or companion can configure a shared executor once for the application. Every skill in the application that uses that executor can reuse those settings.
+With Manager access, a user or their companion can configure a shared executor once for the application. Every skill in the application that uses that executor can reuse those settings.
 
-In Console administration, owners can change trace persistence, view the Cloud-managed session limits, and see which settings are active or pending. Saved changes to variables and settings take effect together on the next successful publication. [Runtime settings and defaults](java-execution-engine-roadmap.md#administrative-runtime-settings)
+In Console administration, users with Manager access can change trace persistence, view the Cloud-managed session limits, and see which settings are active or pending. Saved changes to variables and settings take effect together on the next successful publication. [Runtime settings and defaults](java-execution-engine-roadmap.md#administrative-runtime-settings)
 
-Owners can choose **Restart application** to apply saved edits using the current published pack.
+Users with Manager access can choose **Restart application** to apply saved edits using the current published pack.
 
-The owner and companion can prepare skills and runtime configuration, see how the skills fit together, distinguish staged work from the published version, and publish an update. Before publishing, they can ask Framework to validate the staged pack and review any issues while the current version keeps serving. If publication fails, the owner can see the failure.
+With Manager access, users and their companions can prepare skills and runtime configuration, see how the skills fit together, distinguish staged work from the published version, and publish an update. Before publishing, they can ask Framework to validate the staged pack and review any issues while the current version keeps serving. If publication fails, the user can see the failure.
 
-The first V1 authoring milestone is upload and download of the portable skill pack as one [publication ZIP](publication-package-format.md). The owner or companion can download a staged or published pack. [Go upload checks](go-backend-roadmap.md#zip-checks-before-staging)
+The first V1 authoring milestone is upload and download of the portable skill pack as one [publication ZIP](publication-package-format.md). With Manager access, a user or their companion can download a staged or published pack. [Go upload checks](go-backend-roadmap.md#zip-checks-before-staging)
 
 The owner can review one staging revision while a Manager uploads another. Either can publish. Publishing the reviewed revision requires confirmation when a newer revision is staged. The newer work stays available. [Staging and publication workflow](go-backend-roadmap.md#upload-and-staged-validation)
 
-An owner can promote a tested QA publication to production through Console or MCP, review the staged pack, and download the original QA publication. [Promotion workflow](go-backend-roadmap.md#publication-promotion)
+A user with Manager access to both applications can promote a tested QA publication to production through Console or MCP, review the staged pack, and download the original QA publication. [Promotion workflow](go-backend-roadmap.md#publication-promotion)
 
 The companion should have access to Framework's skill definitions and authoring guidance. A visual skill editor is a possible later addition.
 
