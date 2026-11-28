@@ -4,6 +4,7 @@
 
 ## What belongs here
 
+- Add the Manager-only latest-operation lookup by application ID and the full application status and history views. Show serving status, the most recently accepted Publish or Restart with its request ID, target version and progress or outcome, and the last confirmation time. Reuse Phase 1’s by-ID GET for individual requests and extend it to Restart. [Application status](../future/go-backend-roadmap.md#application-status)
 - When introducing saved mission timeouts, verify the synchronous Invoke transport, Go server and ingress budgets accommodate supported mission durations and response delivery. Phase 1 sizes those budgets for the 60-second mission default.
 
 - Complete the staging and publication workflows: identical uploads, validation results per revision, explicit revalidation, reviewed-revision confirmation, an already-published selection, and retained history and download by selector. Preserve the current publication across a failed candidate. [Publication workflow](../future/go-backend-roadmap.md#publishing-a-reviewed-revision) · [Pack history](../future/go-backend-roadmap.md#pack-history)
@@ -12,6 +13,7 @@
 
 ## Completion evidence
 
+Lose the caller’s response before it receives a request ID. With Manager access, reload the application status, find the latest accepted operation and use its ID to read that request. Verify that a later confirmation of an older request updates its outcome and the last confirmation time while the latest-operation lookup still returns the newer accepted request.
 Publish the worked variable fixture in two private namespaces with different saved values for the same names. Verify the provider and executor receive their own application’s values. Rotate one application’s value and Restart with the same ZIP and publication version. Verify the new generation uses the rotated value, already admitted work retains its original value, and the other application keeps its own values. Restore on a replacement engine and verify each application again.
 
 Stage B while someone reviews A, publish A with confirmation, and verify B stays staged. Restart the published version after a settings edit and confirm the generation change. Exercise a lost restart reply and check the same-JVM generation evidence. Restart Go with a request known to be unsent and, separately, with one that may have reached Java. Check the original request ID, the publication used for recovery, and what a new invocation can run. On engine replacement, verify one failed restore leaves other applications able to recover.

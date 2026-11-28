@@ -12,6 +12,8 @@ GitHub PR 2, Go backend Phase 1. Depends on PR 2.1.1–2.1.6. Use the moved Cons
 
 ## Requirements
 
+Implement this ticket’s public routes, request bodies, response fields and statuses from the [Phase 1 Cloud REST API](../future/phase-1-rest-api.md).
+
 Give the outbound synchronous Invoke call a 75-second total budget, including the wait for response headers. Configure its transport to allow that wait beyond the Console diagnostic client's 10-second header and 30-second request defaults. PR 2.1.2 supplies the 90-second caller-facing budget. These budgets cover Phase 1's 60-second mission default. Publish confirmation and Console streams retain their own timing rules.
 
 - Consume the Java wrapper's top-level `sessionId` from PR 2.1.3. The Framework supplies the canonical ID independently of execution views. Verify that REST preserves the same ID on success and post-session failure and omits it on a pre-session failure.
@@ -23,9 +25,12 @@ Give the outbound synchronous Invoke call a 75-second total budget, including th
 
 ## Acceptance criteria
 
+- [ ] Invoke as an authorized Caller with the application row seeded as `Deleting`, requests enabled, a current publication and an eligible engine hosting the namespace. Return `409 Conflict` with reason `Deleting` before routing. Verify zero engine dispatches. Previously admitted invocations may drain.
+
 - [ ] With an eligible observation already established, verify Invoke goes directly to the engine with zero pre-dispatch probes or snapshot reads. Disconnect Console and verify Invoke is rejected before dispatch until a fresh authenticated observation on reconnect shows the namespace again.
 
-- [ ] Through ingress, obtain a successful engine response delayed more than 30 seconds but within the mission deadline. Send a valid ordinary JSON invocation of exactly 20,971,520 bytes and verify it reaches the engine. Send one byte over and verify Go returns the documented 413 with zero engine dispatches.
+- [ ] Through ingress, obtain a successful engine response delayed more than 30 seconds but within the mission deadline.
+- [ ] Through ingress, send valid caller JSON containing a single large ASCII input string. Size the serialized public body to exactly 20,971,520 bytes before Go adds namespace and caller. Invoke a real deterministic skill that accepts that input and returns a small known result. Assert HTTP 200, the expected result and a nonblank Framework session ID. Extend the string by one ASCII byte and repeat with valid JSON of 20,971,521 bytes. Assert Go returns the documented 413 rejection before dispatch, with zero engine calls for the oversized request.
 
 For the deployed walkthrough, reuse PR 2.1.4’s test issuer and fixture to mint a fresh owner token. Send it as a bearer token on ordinary REST requests and capture sanitized results. The live Supabase email-code sign-in belongs to the post-V1 test suite.
 
@@ -33,6 +38,8 @@ For the deployed walkthrough, reuse PR 2.1.4’s test issuer and fixture to mint
 - [ ] Authenticate with the locally signed owner token, create and repeat creation, stage and validate original bytes, publish, then invoke through the public REST entry point. Demonstrate the same application ID, staging revision, accepted publication, observed namespace and returned result/session ID line up. Capture repeatable steps and expected outcomes without embedding credentials.
 - [ ] An inaccessible application and an unpublished application produce zero Java dispatches. Exercise offline/terminating placement, disabled requests and body size rejection. A lost response after dispatch produces one engine invocation and an unknown outcome.
 - [ ] With views off, the successful real-engine walkthrough returns a nonblank top-level `sessionId` through REST. Verify that Go forwards the engine’s ID verbatim for the same invocation, including on a post-session failure, and omits the field on a pre-session failure. An absent ID on the successful walkthrough fails the phase gate. Rerun the migrated standalone diagnostic smoke check and preserve the evidence for Phase 2.
+
+- [ ] Use the same real-engine post-session failure with the default `ONERROR` policy. On PR 2.1.3’s shared trace mount, find `<canonical entry namespace>/<sessionId>.<traceId>.execution-trace.ndjson` using the session ID returned by REST. Record the completed file’s relative path and digest. Replace the engine pod, verify its pod UID changed, and verify the same file and digest on its trace mount.
 
 ## Handoff and deferred work
 

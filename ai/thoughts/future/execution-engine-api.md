@@ -94,6 +94,8 @@ Java uses the skill's declared input shape to construct missing object or array 
 
 ## Validate and publish responses
 
+Go uses one fixed V1 deadline of 30 seconds per outbound Validate or Install HTTP call. Each call starts a fresh timer before connecting and uses that budget through ZIP upload, response headers and response body. Both transports allow the full remaining budget for response headers.
+
 For staged validation, Java runs the independent wrapper and Framework checks and returns a completed report as `200 OK` with `valid`, `issues`, and `skills`. An authored Vertex credential-policy violation is a structured issue. Java continues checking unrelated skill references when they can be validated. Each issue carries `severity`, `sourceName`, and `message`, plus `skillName` and `fieldPath` when available. Each validated skill carries `namespace`, `localName`, and `kind`. Warnings alone leave `valid` true. Any `ERROR` yields `valid: false` and an empty `skills` array.
 
 After Framework's `publish` method returns successfully, Java responds with `204 No Content`. [Go publication handling](go-backend-roadmap.md#publishing-a-reviewed-revision)

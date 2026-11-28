@@ -2,6 +2,8 @@
 
 ## Go backend components
 
+The [Phase 1 Cloud REST API](phase-1-rest-api.md) specifies public routes, request bodies, statuses and response fields for the first application workflow.
+
 Full Cloud runs one Go backend deployment in V1. Its four components run in one process, call each other through Go functions or methods, and share the Console proxy's in-memory observations. REST, MCP, and web UI handlers call the same authorized Cloud API operations. The cleanup job and the Java engine communicate with Go across process boundaries.
 
 | Name | Responsibility |
@@ -41,6 +43,8 @@ At startup and on reload, if any part of a namespace's configuration fails to lo
 While a namespace is skipped, [manual uploads and overwrites](#manual-trace-upload-quota) and [quota-screen reads](#quota-visibility) follow the [Cloud API rule for unavailable required data](#go-backend-components). REST returns `503 Service Unavailable`, MCP reports the same condition, and an upload or overwrite leaves the stored files untouched.
 
 The `reloadable` section holds three independent installation-wide quota defaults, each initially 100 MB (100,000,000 bytes) per application: [manual trace uploads](#manual-trace-upload-quota), [retained engine traces](#trace-cleanup-job), and [retained skill packs](#pack-history). The operator can override any of the three for an application using its application ID as the key. All defaults and overrides reload while Go is running. Each application inherits the current default for any quota it does not override. Removing an override restores that quota’s current default for the application.
+
+At startup and on reload, Go validates each override’s application ID syntax and quota values locally, without a database lookup. Go accepts a valid override for a well-formed ID even when the application does not yet exist. The override takes effect when a matching application exists. A malformed entry follows the per-application error handling above.
 
 An explicit namespace override of `0` sets that quota to zero bytes.
 
@@ -102,6 +106,8 @@ The shared Cloud API applies the per-application Delete admission rule above to 
 
 After a successful access check, Go gives a signed-in user the same `404 Not Found` response when the application does not exist or the user has no access to it. If the user has access to the application but their Cloud role does not permit the requested action, Go returns `403 Forbidden`.
 
+After authorizing Stage, Publish, or Invoke, Go checks the application row’s lifecycle state. If it is `Deleting`, REST returns `409 Conflict` with reason `Deleting`. Stage stops before writing pack files, changing staging, or validating. Publish stops before selection warnings, the already-published check, or acceptance, so it allocates no request ID or version. Invoke stops before dispatch even if the engine still hosts the namespace. Previously admitted invocations may drain.
+
 If Go cannot complete the application access check, it returns `503 Service Unavailable` before dispatching a skill or applying a management change. The response tells the caller that Go could not verify access to the application and that they can retry the request.
 
 For open subscriptions, the shared subscription handler applies the same check at subscription time and repeats it at the [operator-configured interval](#go-backend-configuration). Delivery continues during the check. A successful check keeps the subscription open without interruption. If access ends or Go cannot verify it, the handler closes only the affected subscription.
@@ -154,6 +160,8 @@ Go writes original pack ZIP bytes to the [shared volume](roadmap.md#durable-exec
 
 Upload stages the pack and returns advisory validation feedback. Publish is a separate action that automatically runs fresh validation on the selected staged revision before installing it. The caller can select Publish directly, including when validation was unavailable at upload time.
 
+Validate and Install each receive the [30-second outbound deadline](execution-engine-api.md#validate-and-publish-responses). If Validate times out during staging, Go keeps the revision and reports validation unavailable. If fresh validation times out during an accepted Publish, Go records a terminal validation-unavailable failure, returns the request ID and skips Install.
+
 ### ZIP checks before staging
 
 An MCP companion uploads a local pack in one authenticated `upload_pack(applicationId, zipBase64)` call. The companion client reads the ZIP and base64-encodes its bytes. Go checks the signed-in user's upload permission for the application, decodes the ZIP, and passes the original bytes to the shared upload and staging operation. The tool returns that operation's outcome, including the revision ID and validation feedback for a newly staged pack.
@@ -163,6 +171,8 @@ Go authorizes the upload and checks the entire archive against the [package limi
 Go requires one top-level directory matching the destination namespace, the [companion entry point](publication-package-format.md#required-companion-entry-point), and the [execution subtree layout](publication-package-format.md#execution-inputs), including lowercase skill paths. In `loomspan/execution.yaml`, reject reserved administrative sections and any executor configuration owner key that differs from the destination namespace. Report the offending field and its pack-relative source. A pack that passes these checks can be staged while the engine is offline.
 
 Use one Go pack inspection routine to check archive and layout and Cloud naming and configuration rules, and to discover variable references with their authored source paths. Upload and promotion apply the pre-staging checks. Validation and installation reuse the same discovery logic for the selected revision. Framework checks skill references and the composed execution configuration, and Java enforces the provider policy during validation and preparation. The [shared variable fixtures](application-variable-conformance.md) cover the discovery rules used by both languages.
+
+Variable discovery runs on the authored ZIP before staging and requires no application values. On a discovery failure such as `blank-name`, Go rejects the candidate locally with the corpus reason and each pack-relative source and authored YAML path in diagnostic order. The previous staged revision and its validation feedback stay intact. A valid marker with a missing or blank application value passes discovery and proceeds to ordinary staged validation. An effective mapping-key collision that depends on a supplied value also passes discovery. Java diagnoses that collision if substitution during installation produces it.
 
 Before staging an upload or promotion, Go checks each skill’s local name against the [qualified name length limit](publication-package-format.md#namespace-and-skill-names) using the destination namespace. A total of 64 ASCII characters, including the two separator characters, passes this check. If the total exceeds 64, Go rejects the pack and identifies the offending skill and its pack-relative source file. The destination keeps its current staged revision and validation results. Go performs this check locally even when the engine is offline.
 
@@ -207,6 +217,12 @@ For a new installation, Go first commits the [Publish acceptance transaction](#p
 If the pack fails validation, a required variable is missing or blank, validation cannot complete, the current snapshot is unavailable, or the pod is terminating before Go sends the install, Go records a terminal failed Publish with the specific reason on the accepted request. The caller receives its request ID and diagnostic. The failure is visible in request history and as the latest status while this is the most recently accepted request. The revision stays staged, the current publication pointer stays in place, and the failed request releases its ZIP protection. Its target version does not appear as a confirmed publication in pack history. A lost reply after install dispatch follows the [unconfirmed publication rules](#unconfirmed-publications).
 
 For a new publication, Java's `204 No Content` confirms installation. Before reporting success, Go records the request outcome and applies the [current-publication transaction rule](#unconfirmed-publications). If the pod dies before Console observes the acknowledged version, recovery restores the application's durably current publication.
+
+### Dispatch eligibility for Validate and Publish
+
+For each new Validate or Install call, the engine selector must match exactly one watched pod. That pod must have no `metadata.deletionTimestamp` and Go must have an authenticated snapshot from its JVM on the current Console connection. A sole pod with `Ready=False` and zero installed namespaces is eligible for validation and first publication once Go has that snapshot. Invoke retains its separate [routing requirements](roadmap.md#starting-point-for-placement-and-routing).
+
+If a terminating pod and its replacement are both visible, neither receives a new Validate or Install call. During the overlap, Stage keeps the revision and reports validation unavailable. An accepted Publish records a placement failure and returns its request ID. Once the replacement is the sole match, its own current authenticated observation can make it eligible. For an Install already dispatched, the original pod UID and JVM `instanceId` identify the confirmation target. Go never resends that Install to the replacement.
 
 ### Engine shutdown during Publish or Validate
 
@@ -261,7 +277,9 @@ If the caller loses the response before receiving the ID, the [ordinary Console 
 
 ### Unconfirmed publications
 
-If the placement controller loses the publish response after dispatch, it requests an immediate snapshot refresh from the Console proxy and watches for the requested change for the configured confirmation window (30 seconds in V1). For a new publication, confirmation means observing the requested namespace and version on the intended engine. For a restart, use the [restart confirmation rule](#restarting-an-application). If the window expires, Go returns the request ID and tells the caller the installation is unconfirmed and may still complete. The timeout ends the caller’s wait. Go continues checking for confirmation and never resends the original installation request, including after a Go restart.
+If Go knows the Install request was never sent, it records a terminal failure. If the request may have reached Java and Go lacks a definitive reply, the confirmation window starts as soon as Go detects the lost reply or the outbound deadline expires, whichever comes first. Go immediately requests a snapshot refresh from the Console proxy. The refresh uses time within the confirmation window (30 seconds in V1).
+
+For a new publication, confirmation means observing the requested namespace and version on the intended engine. For a restart, use the [restart confirmation rule](#restarting-an-application). If the window expires, Go returns the request ID and tells the caller the installation is unconfirmed and may still complete. The timeout ends the caller’s wait. Go continues checking for confirmation and never resends the original installation request, including after a Go restart.
 
 On backend restart, Go records **Interrupted before dispatch** against the original request ID if it can establish that an accepted installation was never sent. This ends the request, including any hold it placed on Delete or ZIP trimming. The caller can submit a new Publish or Restart. Verify this by restarting Go while an accepted request is still held behind an earlier installation.
 
@@ -272,6 +290,8 @@ When an installation is confirmed under the rules for its operation, Go records 
 For example, publish A loses its reply, B succeeds, and C succeeds and becomes current. A stays unconfirmed unless Go receives confirmation for A. A late confirmation records success for A and leaves C current for recovery. While A’s ZIP is retained, [pack history](#pack-history) lists A with its original publisher and the time Go received that confirmation. A is available for download or promotion by version. Only C carries the current-publication marker. B's request still shows success when a subsequent invocation runs C.
 
 If Go accepts a newer publish or restart for the same application while the earlier installation is unconfirmed, it holds the newer request until the snapshot confirms the earlier installation or 30 seconds past the end of its configured confirmation window, whichever comes first. Either event releases the newer request for dispatch. If the newer request then fails, recovery uses the publication that was durably current when Go accepted that request. Go measures the deadline from the start of the earlier request's confirmation wait (60 seconds total with the V1 setting).
+
+For a REST Publish held behind earlier work on the same application, the caller waits up to 90 seconds from when its accepted request first enters the queue. Moving forward in the queue keeps the original deadline. If the request becomes eligible for dispatch before or exactly at that deadline, Go proceeds and returns the usual Publish result. If it is still queued, Go returns HTTP 202 with status `pending` and the durable request ID. The request keeps its place and proceeds when eligible. The caller can follow it through the [request lookup](phase-1-rest-api.md#publish-and-request-lookup).
 
 Framework rejects an earlier candidate as stale if the newer generation becomes active after the earlier candidate captured its base generation. V1 accepts the remaining risk that a delayed earlier request can first enter preparation after the newer generation is active and replace it on the engine. Go still applies the current-publication transaction check above.
 
@@ -316,7 +336,7 @@ On failure, `SkillException.getSessionId()` returns the root ID if a session was
 
 When the engine supplies a session ID, Cloud returns it to the caller. A caller can give that ID to an application administrator, who can use it to [look up the corresponding retained trace](#look-up-retained-traces) within that application. This is the agreed V1 workflow. The Cloud response and lookup still need implementation. In the Framework repository, see `ai/thoughts/tickets/invocation-session-id.md` for direct and admitted caller examples and `ai/thoughts/verification/2026-11-25-invocation-session-id.md` for test evidence.
 
-Go enforces both V1 invocation limits once, after the REST and MCP endpoints converge on the shared invocation path and before dispatch to Java. UI invocations use the same path. Measure the common JSON or multipart invocation body, up to 20 MiB (20,971,520 bytes) in total and up to 25 uploaded files, both inclusive. For MCP file calls, measurement happens after Go decodes the base64 file data and constructs the multipart body. Count the entire common body, including metadata, decoded file bytes, part headers, and boundaries. Each uploaded file part counts once, including an empty file. The JSON metadata part counts only toward the byte limit. If either limit is exceeded, Go rejects the request before dispatch.
+Go enforces both V1 invocation limits once, after the REST and MCP endpoints converge on the shared invocation path and before dispatch to Java. UI invocations use the same path. Measure the caller-facing common JSON or multipart invocation body, up to 20 MiB (20,971,520 bytes) in total and up to 25 uploaded files, both inclusive. For REST JSON, count the received body bytes including syntax and whitespace, before Go adds trusted namespace, caller or execution-view metadata. Go-added fields consume none of the caller’s allowance. For MCP file calls, measurement happens after Go decodes the base64 file data and constructs the multipart body. Count the entire common body, including metadata, decoded file bytes, part headers, and boundaries. Each uploaded file part counts once, including an empty file. The JSON metadata part counts only toward the byte limit. If either limit is exceeded, Go rejects the request before dispatch.
 
 For a rejection by the shared invocation limit check, REST returns `413 Content Too Large` and MCP returns a tool error with the same message. The message identifies the exceeded limit (20 MiB total or 25 files) and tells the caller that the skill did not start.
 
